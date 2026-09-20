@@ -11,46 +11,37 @@ from scipy import ndimage
 st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
 
 
-def detect_traditional(image, n_sigma=5, min_length=10, min_aspect=3.0, min_linearity=2.5):
+def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
     img = np.nan_to_num(image, nan=0.0)
     binary = img > (med + n_sigma * std)
-    labeled, num = ndimage.label(binary)
+    labeled, num = ndimage.label(binary, structure=np.ones((3, 3)))
     candidates = []
     for i in range(1, num + 1):
         ys, xs = np.where(labeled == i)
         n_pix = len(ys)
         if n_pix < 8 or n_pix > 500:
             continue
-        h = ys.max() - ys.min() + 1
-        w = xs.max() - xs.min() + 1
-        length = max(h, w)
-        width = min(h, w)
-        if length < min_length or width < 2:
-            continue
-        aspect = length / (width + 1e-6)
-        if aspect < min_aspect:
-            continue
         pts = np.column_stack([xs, ys]).astype(float)
         pts_centered = pts - pts.mean(axis=0)
         cov = np.cov(pts_centered.T)
-        if cov.size == 4:
-            eigvals = np.sort(np.linalg.eigvalsh(cov))[::-1]
-            if eigvals[1] > 1e-6:
-                linearity = float(np.sqrt(eigvals[0] / eigvals[1]))
-            else:
-                linearity = 999.0
-        else:
+        if cov.size != 4:
+            continue
+        eigvals = np.sort(np.linalg.eigvalsh(cov))[::-1]
+        if eigvals[1] < 1e-6:
             linearity = 999.0
+        else:
+            linearity = float(np.sqrt(eigvals[0] / eigvals[1]))
+        principal_length = 4.0 * np.sqrt(eigvals[0])
+        if principal_length < min_length:
+            continue
         if linearity < min_linearity:
             continue
         candidates.append({
             "x": int(xs.mean()),
             "y": int(ys.mean()),
-            "length": int(length),
-            "width": int(width),
-            "aspect": float(aspect),
+            "length": int(principal_length),
             "linearity": float(linearity),
             "n_pixels": int(n_pix),
         })
@@ -62,16 +53,15 @@ def detect_traditional(image, n_sigma=5, min_length=10, min_aspect=3.0, min_line
     return kept
 
 
-st.title("🔭 AstraFilter")
+st.title("AstraFilter")
 st.subheader("快速移动天体在线检测工具")
-st.markdown("上传天文图像，AstraFilter 会自动检测其中的条纹候选体（可能是快速移动小行星的轨迹），并给出每个候选体的位置、长度、方向和置信度。")
+st.markdown("上传天文图像，AstraFilter 会自动检测其中的条纹候选体（可能是快速移动小行星的轨迹），并给出每个候选体的位置、长度和线性度。")
 
 with st.sidebar:
     st.header("检测参数")
     n_sigma = st.slider("亮度阈值 (sigma)", 3.0, 8.0, 5.0, 0.5)
-    min_length = st.slider("最小条纹长度 (像素)", 5, 30, 10)
-    min_aspect = st.slider("最小长宽比", 2.0, 6.0, 3.0, 0.5)
-    min_linearity = st.slider("最小线性度 (PCA)", 1.5, 5.0, 2.5, 0.5)
+    min_length = st.slider("最小条纹长度 (像素)", 5, 50, 15)
+    min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 st.markdown("---")
 st.header("上传图像")
@@ -102,7 +92,6 @@ if uploaded_file is not None:
 
     if data is not None:
         st.write("图像尺寸: " + str(data.shape))
-        st.write("像素范围: " + str(round(float(data.min()), 2)) + " ~ " + str(round(float(data.max()), 2)))
 
         col1, col2 = st.columns(2)
         with col1:
@@ -116,7 +105,7 @@ if uploaded_file is not None:
 
         if st.button("开始检测", type="primary"):
             with st.spinner("检测中..."):
-                candidates = detect_traditional(data, n_sigma=n_sigma, min_length=min_length, min_aspect=min_aspect, min_linearity=min_linearity)
+                candidates = detect_traditional(data, n_sigma=n_sigma, min_length=min_length, min_linearity=min_linearity)
 
             st.markdown("---")
             st.header("检测结果")
@@ -159,27 +148,26 @@ if uploaded_file is not None:
                     med = np.nanmedian(patch)
                     std = np.nanstd(patch)
                     ax.imshow(patch, cmap="gray", vmin=med-2*std, vmax=med+5*std)
-                    ax.set_title("候选 " + str(i+1) + " (线性度 " + str(round(c["linearity"], 1)) + ")", fontsize=10)
+                    ax.set_title("Candidate " + str(i+1) + " (linearity " + str(round(c["linearity"], 1)) + ")", fontsize=10)
                     ax.axis("off")
                     with cols_ui[i % 3]:
                         st.pyplot(fig)
 
 else:
     st.markdown("---")
-    st.subheader("使用说明")
-    st.markdown("1. 上传一个天文图像文件（FITS 或 PNG/JPG）")
-    st.markdown("2. 在左侧调整检测参数")
-    st.markdown("3. 点击「开始检测」")
-    st.markdown("4. 查看检测到的候选体，下载 CSV 报告")
+    st.subheader("How to use")
+    st.markdown("1. Upload an astronomical image (FITS or PNG/JPG)")
+    st.markdown("2. Adjust detection parameters in the sidebar")
+    st.markdown("3. Click Start Detection")
+    st.markdown("4. View candidates and download CSV report")
     st.markdown("---")
-    st.subheader("支持的文件格式")
-    st.markdown("- **FITS** (`.fits`, `.fits.fz`)：天文标准格式")
-    st.markdown("- **PNG/JPG**：普通图像，会自动转为灰度处理")
+    st.subheader("Detection Principle")
+    st.markdown("AstraFilter uses traditional image processing and PCA linearity analysis to detect streak candidates. It finds pixels brighter than 5 sigma above background, uses 8-connected component labeling to group pixels, then applies PCA to measure elongation and linearity.")
     st.markdown("---")
-    st.subheader("检测原理")
-    st.markdown("AstraFilter 使用传统图像处理和 PCA 线性度分析来检测条纹候选体。它先找出比背景亮 5 个标准差的像素，然后用连通域分析找出所有独立目标，最后根据长宽比和 PCA 线性度筛选出细长的条纹。")
-    st.markdown("---")
-    st.subheader("应用场景")
-    st.markdown("- 快速检查一张天文图像是否有条纹目标")
-    st.markdown("- 批量处理多张 ZTF 图像，找出 FMO 候选体")
-    st.markdown("- 教学演示，帮助理解快速移动天体的检测原理")
+    st.subheader("Architecture")
+    st.markdown("- Data Download: IRSA ZTF archive")
+    st.markdown("- Detection: traditional image processing + PCA")
+    st.markdown("- Multi-frame Verification: cross-date clustering + linear fit")
+    st.markdown("- Multi-source Validation: MPChecker + SkyBoT + JPL Horizons")
+    st.markdown("- Track Analysis: velocity, direction, classification")
+    st.markdown("- MPC Submission: automated 80-column format generation")
