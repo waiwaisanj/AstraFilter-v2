@@ -791,8 +791,7 @@ with tab6:
                 st.markdown("---")
                 st.info("提示：如果知道照片的大致拍摄方向（比如北极星方向），可以用「星图」标签页里的 3D 星空视图对照。你也可以用 Astrometry.net 的在线服务做完整的星空识别。")
 
-else:
-    print("⚠️ 找不到 with tab6: 标记")
+
 
 
 with tab7:
