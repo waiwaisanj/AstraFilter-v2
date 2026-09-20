@@ -11,11 +11,22 @@ import requests
 from astropy.io import fits
 from astropy.wcs import WCS
 
-import plotly.graph_objects as go
-import plotly.express as px
-from astroquery.vizier import Vizier
-from astropy.coordinates import SkyCoord
-import astropy.units as u
+# 可选依赖（用 try-except 包裹，防止构建环境缺失导致崩溃）
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
+try:
+    from astroquery.vizier import Vizier
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+    ASTROQUERY_AVAILABLE = True
+except ImportError:
+    ASTROQUERY_AVAILABLE = False
+    Vizier = None
 
 
 st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
@@ -273,6 +284,9 @@ def generate_audio_description(candidates, data_shape):
 
 
 def query_stars_around(ra, dec, radius_deg=1.0, max_mag=12):
+    if not ASTROQUERY_AVAILABLE:
+        return None
+    
     """查询天区附近的恒星，用 Vizier 的 Tycho-2 星表"""
     try:
         vizier = Vizier(
