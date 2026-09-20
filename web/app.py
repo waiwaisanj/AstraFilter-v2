@@ -363,6 +363,31 @@ def make_3d_sky(stars, candidates=None, ra_center=None, dec_center=None):
     return fig
 
 
+
+
+def detect_bright_stars(image, n_sigma=10, min_pixels=2, max_pixels=500, max_stars=20):
+    """检测图像中的亮星"""
+    med = np.median(image)
+    std = np.std(image)
+    binary = image > (med + n_sigma * std)
+    labeled, num = ndimage.label(binary, structure=np.ones((3, 3)))
+    stars = []
+    for i in range(1, num + 1):
+        ys, xs = np.where(labeled == i)
+        n = len(ys)
+        if n < min_pixels or n > max_pixels:
+            continue
+        brightness = float(np.sum(image[ys, xs]) - med * n)
+        stars.append({
+            "x": int(xs.mean()),
+            "y": int(ys.mean()),
+            "brightness": brightness,
+            "n_pixels": n,
+        })
+    stars = sorted(stars, key=lambda s: -s["brightness"])
+    return stars[:max_stars]
+
+
 # ===== 页面 =====
 st.title("🔭 AstraFilter")
 st.subheader("无障碍天文图像分析平台")
@@ -401,7 +426,7 @@ with st.sidebar:
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔍 检测", "🌌 星图", "📊 图像信息", "✅ 验证", "♿ 无障碍", "📚 学习"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🔍 检测", "🌌 星图", "📊 图像信息", "✅ 验证", "♿ 无障碍", "📷 星空照片", "📚 学习"])
 
 with tab1:
     uploaded_file = st.file_uploader("上传 FITS 或普通图像", type=["fits", "fz", "png", "jpg", "jpeg"])
@@ -674,6 +699,103 @@ AstraFilter 为色盲和视觉障碍用户提供了以下功能：
 
 
 with tab6:
+    st.header("📷 星空照片亮星检测")
+    st.markdown("上传一张星空照片（手机拍摄的照片也可以），系统会自动检测照片里的亮星，并在照片上标注它们的位置。这个功能可以帮助你识别照片中的星座和主要恒星。")
+
+    photo_file = st.file_uploader("选择星空照片", type=["png", "jpg", "jpeg", "fits", "fz"], key="photo_upload")
+
+    if photo_file is not None:
+        # 读取图像
+        file_ext = photo_file.name.split(".")[-1].lower()
+        photo_data = None
+
+        if file_ext in ("fits", "fz"):
+            try:
+                with fits.open(BytesIO(photo_file.read())) as hdul:
+                    for hdu in hdul:
+                        if hdu.data is not None and len(hdu.data.shape) == 2:
+                            photo_data = np.nan_to_num(hdu.data.copy(), nan=0.0)
+                            break
+            except Exception as e:
+                st.error("读取失败: " + str(e))
+        else:
+            try:
+                img = Image.open(photo_file).convert("L")
+                photo_data = np.array(img).astype(np.float32)
+            except Exception as e:
+                st.error("读取失败: " + str(e))
+
+        if photo_data is not None:
+            st.write("图像尺寸: " + str(photo_data.shape))
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("原始照片")
+                med = np.median(photo_data)
+                std = np.std(photo_data)
+                fig, ax = plt.subplots(figsize=(6, 6))
+                ax.imshow(photo_data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+                ax.axis("off")
+                st.pyplot(fig)
+
+            st.markdown("---")
+            st.subheader("检测参数")
+            threshold = st.slider("亮星阈值 (sigma)", 5, 30, 10, 1)
+            max_stars = st.slider("最多检测亮星数", 5, 50, 20, 1)
+
+            if st.button("检测亮星", type="primary"):
+                with st.spinner("检测中..."):
+                    stars = detect_bright_stars(photo_data, n_sigma=threshold, max_stars=max_stars)
+                st.session_state["bright_stars"] = stars
+                st.session_state["photo_data"] = photo_data
+
+            stars = st.session_state.get("bright_stars", [])
+
+            if len(stars) > 0:
+                st.success("检测到 " + str(len(stars)) + " 颗亮星")
+
+                with col2:
+                    st.subheader("标注结果")
+                    fig, ax = plt.subplots(figsize=(6, 6))
+                    med = np.median(photo_data)
+                    std = np.std(photo_data)
+                    ax.imshow(photo_data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+                    for i, s in enumerate(stars):
+                        ax.plot(s["x"], s["y"], "r+", markersize=15, markeredgewidth=2)
+                        ax.text(s["x"]+10, s["y"]-10, str(i+1), color="lime", fontsize=14, weight="bold")
+                    ax.axis("off")
+                    st.pyplot(fig)
+
+                st.markdown("---")
+                st.subheader("亮星列表")
+                df_stars = pd.DataFrame(stars)
+                st.dataframe(df_stars)
+
+                st.markdown("---")
+                st.subheader("亮星几何模式")
+                st.markdown("下面是亮星在照片中的相对位置。你可以把这个模式和大范围星图对照，判断拍摄的天区。")
+
+                fig, ax = plt.subplots(figsize=(8, 8), facecolor="black")
+                ax.set_facecolor("black")
+                ax.invert_yaxis()
+                xs = [s["x"] for s in stars]
+                ys = [s["y"] for s in stars]
+                sizes = [s["n_pixels"] * 8 + 20 for s in stars]
+                ax.scatter(xs, ys, s=sizes, c="yellow", edgecolors="orange", linewidth=1)
+                for i, s in enumerate(stars):
+                    ax.text(s["x"]+15, s["y"]-15, str(i+1), color="white", fontsize=12)
+                ax.set_aspect("equal")
+                ax.axis("off")
+                st.pyplot(fig)
+
+                st.markdown("---")
+                st.info("提示：如果知道照片的大致拍摄方向（比如北极星方向），可以用「星图」标签页里的 3D 星空视图对照。你也可以用 Astrometry.net 的在线服务做完整的星空识别。")
+
+else:
+    print("⚠️ 找不到 with tab6: 标记")
+
+
+with tab7:
     st.header("什么是快速移动天体 (FMO)？")
     st.markdown("""
 快速移动天体（FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
