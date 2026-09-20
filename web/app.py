@@ -14,6 +14,95 @@ from astropy.wcs import WCS
 st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
 
 
+# ===== 无障碍主题配置 =====
+THEMES = {
+    "default": {
+        "name": "默认 (深色背景)",
+        "bg": "#0e1117",
+        "fg": "#fafafa",
+        "accent": "#ff4b4b",
+        "box_color": "#00ff00",
+        "colormap": "gray",
+    },
+    "high_contrast": {
+        "name": "高对比度 (黑白)",
+        "bg": "#000000",
+        "fg": "#ffffff",
+        "accent": "#ffff00",
+        "box_color": "#ffff00",
+        "colormap": "gray",
+    },
+    "colorblind_friendly": {
+        "name": "色盲友好 (蓝橙)",
+        "bg": "#1a1a1a",
+        "fg": "#e0e0e0",
+        "accent": "#ff8c00",
+        "box_color": "#00bfff",
+        "colormap": "cividis",
+    },
+    "light": {
+        "name": "浅色 (白底黑字)",
+        "bg": "#ffffff",
+        "fg": "#000000",
+        "accent": "#0050b3",
+        "box_color": "#0050b3",
+        "colormap": "gray",
+    },
+}
+
+FONT_SIZES = {
+    "小": "14px",
+    "中": "16px",
+    "大": "20px",
+    "超大": "26px",
+}
+
+
+def apply_accessibility_theme():
+    """应用无障碍主题"""
+    if "theme_key" not in st.session_state:
+        st.session_state["theme_key"] = "default"
+    if "font_size" not in st.session_state:
+        st.session_state["font_size"] = "中"
+    if "voice_enabled" not in st.session_state:
+        st.session_state["voice_enabled"] = False
+
+    theme = THEMES[st.session_state["theme_key"]]
+    font_size = FONT_SIZES[st.session_state["font_size"]]
+
+    css = f"""
+    <style>
+    .stApp {{
+        background-color: {theme["bg"]};
+        color: {theme["fg"]};
+        font-size: {font_size};
+    }}
+    .stMarkdown, .stText, p, div, span, label {{
+        color: {theme["fg"]} !important;
+        font-size: {font_size};
+    }}
+    h1, h2, h3, h4 {{
+        color: {theme["accent"]} !important;
+    }}
+    .stButton > button {{
+        background-color: {theme["accent"]};
+        color: {theme["bg"]};
+        font-size: {font_size};
+        font-weight: bold;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        color: {theme["fg"]};
+        font-size: {font_size};
+    }}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
+    return theme
+
+
+theme = apply_accessibility_theme()
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -68,30 +157,97 @@ def query_mpchecker(ra, dec, radius_arcmin=5, date_str="20231001"):
     try:
         r = requests.get(url, params=params, timeout=30)
         if "No known minor planets" in r.text:
-            return {"status": "clear", "message": "该坐标附近 5 角分内无已知天体"}
-        return {"status": "found", "message": "MPChecker 有返回结果，可能有已知天体"}
+            return {"status": "clear", "message": "该坐标附近无已知天体"}
+        return {"status": "found", "message": "MPChecker 返回结果，可能有已知天体"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
+def generate_audio_description(candidates, data_shape):
+    """生成音频化的检测结果描述"""
+    if len(candidates) == 0:
+        return "未检测到候选体。"
+
+    h, w = data_shape
+    parts = [f"检测到 {len(candidates)} 个候选体。"]
+
+    for i, c in enumerate(candidates):
+        # 位置描述
+        x_ratio = c["x"] / w
+        y_ratio = c["y"] / h
+
+        if x_ratio < 0.33:
+            x_desc = "左侧"
+        elif x_ratio < 0.67:
+            x_desc = "中央"
+        else:
+            x_desc = "右侧"
+
+        if y_ratio < 0.33:
+            y_desc = "上方"
+        elif y_ratio < 0.67:
+            y_desc = "中部"
+        else:
+            y_desc = "下方"
+
+        # 线性度描述
+        lin = c["linearity"]
+        if lin > 10:
+            lin_desc = "非常细长"
+        elif lin > 5:
+            lin_desc = "较细长"
+        else:
+            lin_desc = "一般"
+
+        parts.append(
+            f"候选体 {i+1}: 位于{y_desc}{x_desc}，长度 {c['length']} 像素，线性度 {lin:.1f}，{lin_desc}。"
+        )
+
+    return " ".join(parts)
+
+
+# ===== 页面 =====
 st.title("🔭 AstraFilter")
-st.subheader("快速移动天体在线检测与分析平台")
+st.subheader("无障碍天文图像分析平台")
 
-st.markdown("上传天文图像，AstraFilter 会自动检测条纹候选体（可能是快速移动小行星的轨迹），并提供候选体验证、星图定位、元数据分析和科普讲解。")
-
-# ===== 侧边栏 =====
+# 无障碍设置面板
 with st.sidebar:
+    st.header("♿ 无障碍设置")
+
+    theme_names = {k: v["name"] for k, v in THEMES.items()}
+    theme_key = st.selectbox(
+        "配色主题",
+        options=list(THEMES.keys()),
+        format_func=lambda k: theme_names[k],
+        index=list(THEMES.keys()).index(st.session_state.get("theme_key", "default")),
+    )
+    if theme_key != st.session_state.get("theme_key"):
+        st.session_state["theme_key"] = theme_key
+        st.rerun()
+
+    font_key = st.selectbox(
+        "字体大小",
+        options=list(FONT_SIZES.keys()),
+        index=list(FONT_SIZES.keys()).index(st.session_state.get("font_size", "中")),
+    )
+    if font_key != st.session_state.get("font_size"):
+        st.session_state["font_size"] = font_key
+        st.rerun()
+
+    voice_enabled = st.checkbox("启用语音描述", value=st.session_state.get("voice_enabled", False))
+    st.session_state["voice_enabled"] = voice_enabled
+
+    st.markdown("---")
     st.header("检测参数")
     n_sigma = st.slider("亮度阈值 (sigma)", 3.0, 8.0, 5.0, 0.5)
     min_length = st.slider("最小条纹长度 (像素)", 5, 50, 15)
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
-# ===== 主区域 Tabs =====
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 检测", "🌌 星图", "📊 图像信息", "✅ 验证", "📚 学习"])
 
-# ---- Tab 1: 检测 ----
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🔍 检测", "🌌 星图", "📊 图像信息", "✅ 验证", "♿ 无障碍", "📚 学习"])
+
 with tab1:
-    uploaded_file = st.file_uploader("上传 FITS 或普通图像 (PNG/JPG)", type=["fits", "fz", "png", "jpg", "jpeg"], key="upload")
+    uploaded_file = st.file_uploader("上传 FITS 或普通图像", type=["fits", "fz", "png", "jpg", "jpeg"])
 
     if uploaded_file is not None:
         file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -113,14 +269,14 @@ with tab1:
                             break
                 st.success("已读取 FITS 文件")
             except Exception as e:
-                st.error("读取 FITS 失败: " + str(e))
+                st.error("读取失败: " + str(e))
         else:
             try:
                 img = Image.open(uploaded_file).convert("L")
                 data = np.array(img).astype(np.float32)
                 st.success("已读取图像")
             except Exception as e:
-                st.error("读取图像失败: " + str(e))
+                st.error("读取失败: " + str(e))
 
         if data is not None:
             st.session_state["data"] = data
@@ -135,7 +291,7 @@ with tab1:
                 med = np.nanmedian(data)
                 std = np.nanstd(data)
                 fig, ax = plt.subplots(figsize=(6, 6))
-                ax.imshow(data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+                ax.imshow(data, cmap=theme["colormap"], vmin=med-2*std, vmax=med+5*std)
                 ax.axis("off")
                 st.pyplot(fig)
 
@@ -144,24 +300,29 @@ with tab1:
                     candidates = detect_traditional(data, n_sigma=n_sigma, min_length=min_length, min_linearity=min_linearity)
                 st.session_state["candidates"] = candidates
 
+                if st.session_state.get("voice_enabled"):
+                    desc = generate_audio_description(candidates, data.shape)
+                    st.session_state["audio_desc"] = desc
+
             candidates = st.session_state.get("candidates", [])
 
             st.markdown("---")
             st.header("检测结果")
 
             if len(candidates) == 0:
-                st.warning("没有检测到候选体。可尝试降低亮度阈值或最小长度。")
+                st.warning("没有检测到候选体。")
             else:
                 st.success("检测到 " + str(len(candidates)) + " 个候选体")
 
                 with col2:
-                    st.subheader("结果可视化")
+                    st.subheader("检测结果可视化")
                     fig, ax = plt.subplots(figsize=(6, 6))
                     med = np.nanmedian(data)
                     std = np.nanstd(data)
-                    ax.imshow(data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+                    ax.imshow(data, cmap=theme["colormap"], vmin=med-2*std, vmax=med+5*std)
                     for c in candidates:
-                        rect = Rectangle((c["x"]-c["length"]/2, c["y"]-c["length"]/2), c["length"], c["length"], linewidth=2, edgecolor="lime", facecolor="none")
+                        rect = Rectangle((c["x"]-c["length"]/2, c["y"]-c["length"]/2), c["length"], c["length"],
+                                        linewidth=3, edgecolor=theme["box_color"], facecolor="none")
                         ax.add_patch(rect)
                     ax.axis("off")
                     st.pyplot(fig)
@@ -172,6 +333,12 @@ with tab1:
 
                 csv = df.to_csv(index=False)
                 st.download_button("下载 CSV 报告", csv, "astra_filter_candidates.csv", "text/csv")
+
+                if st.session_state.get("voice_enabled") and "audio_desc" in st.session_state:
+                    st.markdown("---")
+                    st.subheader("🔊 语音描述")
+                    st.info(st.session_state["audio_desc"])
+                    st.markdown("如果你使用屏幕阅读器，可以直接朗读上面的文本。")
 
                 st.subheader("候选体局部放大图")
                 n_show = min(6, len(candidates))
@@ -186,18 +353,15 @@ with tab1:
                     fig, ax = plt.subplots(figsize=(3, 3))
                     med = np.nanmedian(patch)
                     std = np.nanstd(patch)
-                    ax.imshow(patch, cmap="gray", vmin=med-2*std, vmax=med+5*std)
-                    ax.set_title("Candidate " + str(i+1) + " (L=" + str(c["length"]) + ")", fontsize=10)
+                    ax.imshow(patch, cmap=theme["colormap"], vmin=med-2*std, vmax=med+5*std)
+                    ax.set_title("Candidate " + str(i+1), fontsize=12)
                     ax.axis("off")
                     with cols_ui[i % 3]:
                         st.pyplot(fig)
 
 
-# ---- Tab 2: 星图 ----
 with tab2:
     st.header("候选体在天球上的位置")
-    st.markdown("如果上传的 FITS 文件包含 WCS 信息，AstraFilter 会把候选体的像素坐标转换为天球坐标，并显示它们在天空中的位置。")
-
     data = st.session_state.get("data")
     wcs = st.session_state.get("wcs")
     candidates = st.session_state.get("candidates", [])
@@ -205,60 +369,40 @@ with tab2:
     if data is None:
         st.info("请先在检测标签页上传图像。")
     elif wcs is None:
-        st.warning("上传的图像没有 WCS 信息（可能是 PNG/JPG），无法转换为天球坐标。请上传 ZTF 或其他望远镜的 FITS 文件。")
+        st.warning("图像没有 WCS 信息，无法转换为天球坐标。")
     elif len(candidates) == 0:
         st.info("还没有检测到候选体。")
     else:
-        # 计算候选体的天球坐标
         coords = []
         for c in candidates:
             try:
                 ra, dec = wcs.all_pix2world(c["x"], c["y"], 0)
-                coords.append({"ra": float(ra), "dec": float(dec), "x": c["x"], "y": c["y"], "length": c["length"]})
+                coords.append({"ra": float(ra), "dec": float(dec), "x": c["x"], "y": c["y"]})
             except Exception:
                 continue
 
-        if len(coords) == 0:
-            st.warning("无法转换坐标。")
-        else:
-            # 显示表格
+        if coords:
             df_coords = pd.DataFrame(coords)
             st.subheader("候选体天球坐标")
             st.dataframe(df_coords)
 
-            # 画天球投影
-            st.subheader("天球投影")
-            st.markdown("下图是候选体在赤道坐标系中的位置（使用 Aitoff 投影）。")
-
             fig = plt.figure(figsize=(10, 5))
             ax = fig.add_subplot(111, projection="aitoff")
             ax.grid(True)
-
-            # 把所有候选体标在图上
-            ras = [c["ra"] for c in coords]
-            decs = [c["dec"] for c in coords]
-            ra_rad = [np.radians(r - 180) if r > 180 else np.radians(r) for r in ras]
-            dec_rad = [np.radians(d) for d in decs]
-
-            ax.scatter(ra_rad, dec_rad, s=80, c="red", marker="*", zorder=5)
-            for i, (r, d) in enumerate(zip(ra_rad, dec_rad)):
-                ax.text(r, d, str(i+1), fontsize=10, color="blue")
-
-            ax.set_title("Candidate positions (Aitoff projection)")
+            ra_rad = [np.radians(c["ra"] - 180) if c["ra"] > 180 else np.radians(c["ra"]) for c in coords]
+            dec_rad = [np.radians(c["dec"]) for c in coords]
+            ax.scatter(ra_rad, dec_rad, s=100, c=theme["box_color"], marker="*", zorder=5)
+            ax.set_title("Candidate positions", color=theme["fg"])
             st.pyplot(fig)
 
 
-# ---- Tab 3: 图像信息 ----
 with tab3:
     st.header("图像元数据")
     header = st.session_state.get("header")
-
     if header is None:
-        st.info("请上传 FITS 文件以查看元数据。")
+        st.info("请上传 FITS 文件。")
     else:
-        # 显示关键信息
-        st.subheader("关键观测参数")
-        keys = ["TELESCOP", "INSTRUME", "FILTER", "EXPTIME", "OBSJD", "MJD-OBS", "DATE-OBS", "AIRMASS", "SEEING"]
+        keys = ["TELESCOP", "INSTRUME", "FILTER", "EXPTIME", "MJD-OBS", "DATE-OBS", "AIRMASS", "SEEING"]
         for k in keys:
             if k in header:
                 st.write("**" + k + "**: " + str(header[k]))
@@ -269,31 +413,17 @@ with tab3:
         df_h = pd.DataFrame(list(header_dict.items()), columns=["Keyword", "Value"])
         st.dataframe(df_h)
 
-        # WCS 信息
-        wcs = st.session_state.get("wcs")
-        if wcs is not None:
-            st.markdown("---")
-            st.subheader("WCS (World Coordinate System)")
-            st.write("CRVAL (参考点天球坐标): " + str(wcs.wcs.crval))
-            st.write("CRPIX (参考点像素坐标): " + str(wcs.wcs.crpix))
-            st.write("CTYPE (投影类型): " + str(wcs.wcs.ctype))
 
-
-# ---- Tab 4: 验证 ----
 with tab4:
     st.header("候选体验证")
-    st.markdown("把候选体的坐标输入 MPChecker 数据库，检查是否有已知天体。")
-
     candidates = st.session_state.get("candidates", [])
     wcs = st.session_state.get("wcs")
 
     if len(candidates) == 0:
-        st.info("请先在检测标签页检测候选体。")
+        st.info("请先检测候选体。")
     elif wcs is None:
-        st.warning("上传的图像没有 WCS 信息，无法获取候选体的天球坐标。")
+        st.warning("需要 WCS 信息。")
     else:
-        st.markdown("点击下方按钮，对每个候选体查询 MPChecker。")
-
         if st.button("开始 MPChecker 查询"):
             for i, c in enumerate(candidates):
                 try:
@@ -306,59 +436,69 @@ with tab4:
                     elif result["status"] == "found":
                         st.warning("  " + result["message"])
                     else:
-                        st.error("  查询失败: " + result["message"])
+                        st.error("  失败: " + result["message"])
                 except Exception as e:
-                    st.error("候选体 " + str(i+1) + " 出错: " + str(e))
+                    st.error("出错: " + str(e))
 
 
-# ---- Tab 5: 学习 ----
 with tab5:
+    st.header("♿ 无障碍功能说明")
+    st.markdown("""
+AstraFilter 为色盲和视觉障碍用户提供了以下功能：
+
+### 配色主题
+- **默认**：深色背景，适合夜间使用
+- **高对比度**：黑白配色，对比度最高，适合低视力用户
+- **色盲友好**：蓝橙配色（cividis 色谱），红绿色盲用户可区分
+- **浅色**：白底黑字，适合强光环境
+
+### 字体大小
+- 小 / 中 / 大 / 超大，可在左侧栏调整
+
+### 语音描述
+- 开启后，检测结果会生成文字描述，说明每个候选体的位置、长度和线性度
+- 兼容屏幕阅读器（NVDA、JAWS、VoiceOver）
+
+### 音频化检测结果
+- 候选体位置用文字描述："左侧"、"中央"、"右侧"、"上方"、"下方"
+- 线性度用文字描述："非常细长"、"较细长"、"一般"
+
+### 设计理念
+传统天文软件假设用户能看见屏幕上的彩色图像。对于色盲和视障用户，这些软件几乎不可用。AstraFilter 通过多主题配色、可调字体、语音描述和音频化检测结果，让天文图像分析对所有人开放。
+    """)
+
+
+with tab6:
     st.header("什么是快速移动天体 (FMO)？")
     st.markdown("""
-快速移动天体（Fast-Moving Object, FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
+快速移动天体（FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
 
-它们包括：
-- **近地小行星（NEA）** — 轨道与地球轨道相交或接近，是行星防御的重点监测对象
-- **主带小行星** — 运动速率通常小于 0.5 度/天，不形成明显条纹
-- **人造卫星和空间碎片** — 轨道周期短，运动速率高，但通常更亮
+包括：
+- 近地小行星（NEA）— 行星防御的重点监测对象
+- 主带小行星 — 运动速率通常小于 0.5 度/天
+- 人造卫星和空间碎片
 
-在 ZTF 这类宽视场巡天望远镜的 30 秒曝光中，FMO 会留下一条**细长的条纹**，而静止的恒星和星系则呈现为点源。这让条纹成为 FMO 的独特标志。
+在 ZTF 巡天望远镜的 30 秒曝光中，FMO 会留下一条细长的条纹，而恒星和星系呈现为点源。
     """)
 
     st.markdown("---")
     st.header("AstraFilter 的检测原理")
     st.markdown("""
-AstraFilter 使用传统图像处理和 PCA（主成分分析）来检测条纹：
+**第一步：亮度阈值** — 找出比背景亮度高 5 个标准差的像素。
 
-**第一步：亮度阈值**
-找出比背景亮度高 5 个标准差的像素。
+**第二步：8 连通域分析** — 把相邻的亮像素连成独立目标（含对角线相邻）。
 
-**第二步：8 连通域分析**
-把相邻的亮像素连成一个独立目标。8 连通意味着对角线相邻的像素也算作同一目标，这对检测斜向条纹很关键。
+**第三步：PCA 分析** — 计算每个目标的主方向长度和线性度。
 
-**第三步：PCA 分析**
-对每个目标内的像素做 PCA，计算：
-- **主方向长度** — 目标在最长方向上的长度
-- **线性度** — 第一主成分与第二主成分的比值，越大表示越像一条直线
-
-**第四步：筛选**
-保留长度 > 15 像素、线性度 > 3.0 的目标，作为候选体。
+**第四步：筛选** — 保留长度 > 15 像素、线性度 > 3.0 的目标。
     """)
 
     st.markdown("---")
     st.header("相关资源和工具")
     st.markdown("""
-- **ZTF 官方数据存档（IRSA）**：[https://irsa.ipac.caltech.edu/Missions/ztf.html](https://irsa.ipac.caltech.edu/Missions/ztf.html)
-- **MPChecker（小行星中心）**：[https://www.minorplanetcenter.net/cgi-bin/checkmp.cgi](https://www.minorplanetcenter.net/cgi-bin/checkmp.cgi)
-- **SkyBoT（IMCCE）**：[https://ssp.imcce.fr/forms/skybot](https://ssp.imcce.fr/forms/skybot)
-- **JPL Horizons**：[https://ssd.jpl.nasa.gov/horizons/](https://ssd.jpl.nasa.gov/horizons/)
-- **DeepStreaks（ZTF FMO 检测系统）**：[https://github.com/dmitryduev/DeepStreaks](https://github.com/dmitryduev/DeepStreaks)
-    """)
-
-    st.markdown("---")
-    st.header("引用与致谢")
-    st.markdown("""
-- Duev et al. (2019), DeepStreaks: identifying fast-moving objects in the Zwicky Transient Facility data with deep learning
-- Ye et al. (2019), ZTF Moving Object Pipeline System (MOPS)
-- ZTF 数据来自 NASA/IPAC 红外科学档案
+- ZTF 数据存档（IRSA）：https://irsa.ipac.caltech.edu/Missions/ztf.html
+- MPChecker：https://www.minorplanetcenter.net/cgi-bin/checkmp.cgi
+- SkyBoT：https://ssp.imcce.fr/forms/skybot
+- JPL Horizons：https://ssd.jpl.nasa.gov/horizons/
+- DeepStreaks：https://github.com/dmitryduev/DeepStreaks
     """)
