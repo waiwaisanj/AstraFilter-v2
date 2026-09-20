@@ -1,0 +1,10 @@
+streamlit>=1.30
+numpy
+pandas
+astropy
+scipy
+requests
+matplotlib
+Pillow
+plotly
+astroquery

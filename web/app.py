@@ -11,7 +11,71 @@ import requests
 from astropy.io import fits
 from astropy.wcs import WCS
 
+import plotly.graph_objects as go
+import plotly.express as px
+from astroquery.vizier import Vizier
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+
+
 st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
+
+# ===== 移动端响应式 CSS =====
+st.markdown("""
+<style>
+/* 手机端单列布局 */
+@media (max-width: 768px) {
+    .stApp {
+        padding: 0.5rem;
+    }
+    .stColumns > div {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    h1 { font-size: 1.5rem !important; }
+    h2 { font-size: 1.2rem !important; }
+    h3 { font-size: 1rem !important; }
+    .stButton > button {
+        width: 100% !important;
+        padding: 1rem !important;
+        font-size: 1.1rem !important;
+    }
+    .stSlider {
+        padding: 0.5rem 0 !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.8rem !important;
+        padding: 0.5rem 0.3rem !important;
+    }
+}
+
+/* 触控友好：增大点击目标 */
+.stButton > button {
+    min-height: 44px;
+    border-radius: 8px;
+}
+
+/* 文件上传区更大，方便手指点击 */
+[data-testid="stFileUploader"] {
+    padding: 1rem;
+    border-radius: 8px;
+}
+
+/* 让 dataframe 在小屏幕上可横向滚动 */
+.dataframe {
+    overflow-x: auto;
+    display: block;
+}
+
+/* 图片自适应宽度 */
+.stImage img {
+    max-width: 100% !important;
+    height: auto !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 
 # ===== 无障碍主题配置 =====
@@ -206,6 +270,99 @@ def generate_audio_description(candidates, data_shape):
     return " ".join(parts)
 
 
+
+
+def query_stars_around(ra, dec, radius_deg=1.0, max_mag=12):
+    """查询天区附近的恒星，用 Vizier 的 Tycho-2 星表"""
+    try:
+        vizier = Vizier(
+            columns=["RAmdeg", "DEmdeg", "VTmag", "HIP", "TYC"],
+            row_limit=500,
+            column_filters={"VTmag": "<" + str(max_mag)},
+        )
+        catalog_list = vizier.query_region(
+            SkyCoord(ra=ra, dec=dec, unit="deg"),
+            radius=radius_deg * u.deg,
+            catalog="I/259/tyc2",
+        )
+        if len(catalog_list) == 0:
+            return None
+        stars = catalog_list[0]
+        return stars
+    except Exception as e:
+        return None
+
+
+def make_3d_sky(stars, candidates=None, ra_center=None, dec_center=None):
+    """生成可旋转的 3D 星空图"""
+    if stars is None or len(stars) == 0:
+        return None
+
+    # 转换赤经赤纬到 3D 笛卡尔坐标（球面投影）
+    ra_rad = np.radians(np.array(stars["RAmdeg"], dtype=float))
+    dec_rad = np.radians(np.array(stars["DEmdeg"], dtype=float))
+    mags = np.array(stars["VTmag"], dtype=float)
+
+    x = np.cos(dec_rad) * np.cos(ra_rad)
+    y = np.cos(dec_rad) * np.sin(ra_rad)
+    z = np.sin(dec_rad)
+
+    # 用星等确定点的大小（越亮越大）
+    sizes = (14 - mags) * 3
+    sizes = np.clip(sizes, 2, 20)
+
+    fig = go.Figure()
+
+    # 添加恒星
+    fig.add_trace(go.Scatter3d(
+        x=x, y=y, z=z,
+        mode="markers",
+        marker=dict(
+            size=sizes,
+            color=mags,
+            colorscale="Viridis",
+            reversescale=True,
+            colorbar=dict(title="星等", x=0.9),
+            opacity=0.8,
+        ),
+        text=["星等: " + str(round(m, 2)) for m in mags],
+        hoverinfo="text",
+        name="恒星",
+    ))
+
+    # 添加候选体
+    if candidates is not None and ra_center is not None:
+        cand_ra = np.radians(np.array([c["ra"] for c in candidates]))
+        cand_dec = np.radians(np.array([c["dec"] for c in candidates]))
+        cx = np.cos(cand_dec) * np.cos(cand_ra)
+        cy = np.cos(cand_dec) * np.sin(cand_ra)
+        cz = np.sin(cand_dec)
+        fig.add_trace(go.Scatter3d(
+            x=cx, y=cy, z=cz,
+            mode="markers",
+            marker=dict(size=15, color="red", symbol="diamond"),
+            text=["候选体 " + str(i+1) for i in range(len(candidates))],
+            hoverinfo="text",
+            name="候选体",
+        ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            bgcolor="#000000",
+        ),
+        paper_bgcolor="#000000",
+        font=dict(color="white"),
+        margin=dict(l=0, r=0, t=30, b=0),
+        height=600,
+        showlegend=True,
+    )
+
+    return fig
+
+
 # ===== 页面 =====
 st.title("🔭 AstraFilter")
 st.subheader("无障碍天文图像分析平台")
@@ -361,7 +518,9 @@ with tab1:
 
 
 with tab2:
-    st.header("候选体在天球上的位置")
+    st.header("星空浏览器")
+    st.markdown("显示候选体附近的已知恒星。可以拖动旋转 3D 星空视图。")
+
     data = st.session_state.get("data")
     wcs = st.session_state.get("wcs")
     candidates = st.session_state.get("candidates", [])
@@ -369,7 +528,7 @@ with tab2:
     if data is None:
         st.info("请先在检测标签页上传图像。")
     elif wcs is None:
-        st.warning("图像没有 WCS 信息，无法转换为天球坐标。")
+        st.warning("图像没有 WCS 信息，无法转换为天球坐标。请上传 FITS 文件。")
     elif len(candidates) == 0:
         st.info("还没有检测到候选体。")
     else:
@@ -381,19 +540,65 @@ with tab2:
             except Exception:
                 continue
 
-        if coords:
-            df_coords = pd.DataFrame(coords)
+        if not coords:
+            st.warning("无法转换坐标。")
+        else:
             st.subheader("候选体天球坐标")
+            df_coords = pd.DataFrame(coords)
             st.dataframe(df_coords)
 
-            fig = plt.figure(figsize=(10, 5))
-            ax = fig.add_subplot(111, projection="aitoff")
-            ax.grid(True)
-            ra_rad = [np.radians(c["ra"] - 180) if c["ra"] > 180 else np.radians(c["ra"]) for c in coords]
-            dec_rad = [np.radians(c["dec"]) for c in coords]
-            ax.scatter(ra_rad, dec_rad, s=100, c=theme["box_color"], marker="*", zorder=5)
-            ax.set_title("Candidate positions", color=theme["fg"])
-            st.pyplot(fig)
+            # ===== 查询已知恒星 =====
+            ra_center = float(np.mean([c["ra"] for c in coords]))
+            dec_center = float(np.mean([c["dec"] for c in coords]))
+
+            st.markdown("---")
+            st.subheader("虚拟天文台查询")
+            st.write("中心坐标: RA=" + str(round(ra_center, 4)) + "°, Dec=" + str(round(dec_center, 4)) + "°")
+
+            radius = st.slider("查询半径 (度)", 0.1, 5.0, 1.0, 0.1)
+            max_mag = st.slider("最大星等", 8, 15, 12)
+
+            if st.button("查询附近恒星"):
+                with st.spinner("查询中..."):
+                    stars = query_stars_around(ra_center, dec_center, radius, max_mag)
+                if stars is None or len(stars) == 0:
+                    st.warning("没有找到恒星，可尝试增大查询半径或提高最大星等。")
+                else:
+                    st.success("找到 " + str(len(stars)) + " 颗恒星")
+                    st.session_state["stars"] = stars
+                    st.session_state["ra_center"] = ra_center
+                    st.session_state["dec_center"] = dec_center
+
+            # ===== 显示 3D 星图 =====
+            if "stars" in st.session_state:
+                stars = st.session_state["stars"]
+                ra_c = st.session_state.get("ra_center", ra_center)
+                dec_c = st.session_state.get("dec_center", dec_center)
+
+                st.markdown("---")
+                st.subheader("3D 星空视图")
+                st.markdown("**在手机上拖动可以旋转视角。这个视图可以在 VR 眼镜（如 Google Cardboard）中查看。**")
+
+                fig3d = make_3d_sky(stars, candidates=coords, ra_center=ra_c, dec_center=dec_c)
+                if fig3d is not None:
+                    st.plotly_chart(fig3d, use_container_width=True)
+
+                # 显示 2D Aitoff 投影
+                st.markdown("---")
+                st.subheader("2D 天球投影")
+                fig = plt.figure(figsize=(10, 5))
+                ax = fig.add_subplot(111, projection="aitoff")
+                ax.grid(True)
+                ra_rad = [np.radians(c["ra"] - 180) if c["ra"] > 180 else np.radians(c["ra"]) for c in coords]
+                dec_rad = [np.radians(c["dec"]) for c in coords]
+                ax.scatter(ra_rad, dec_rad, s=100, c="red", marker="*", zorder=5)
+                ax.set_title("Candidate positions (Aitoff projection)")
+                st.pyplot(fig)
+
+                # 恒星列表
+                st.markdown("---")
+                st.subheader("附近恒星列表（前 50 颗）")
+                st.dataframe(stars[:50].to_pandas())
 
 
 with tab3:
