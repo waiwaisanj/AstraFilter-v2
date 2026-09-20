@@ -308,74 +308,56 @@ def query_stars_around(ra, dec, radius_deg=1.0, max_mag=12):
 
 
 def make_3d_sky(stars, candidates=None, ra_center=None, dec_center=None):
-    """生成可旋转的 3D 星空图"""
+    """用 matplotlib 生成 3D 星空图（不依赖 plotly）"""
     if stars is None or len(stars) == 0:
         return None
 
-    # 转换赤经赤纬到 3D 笛卡尔坐标（球面投影）
-    ra_rad = np.radians(np.array(stars["RAmdeg"], dtype=float))
-    dec_rad = np.radians(np.array(stars["DEmdeg"], dtype=float))
-    mags = np.array(stars["VTmag"], dtype=float)
+    try:
+        ra_rad = np.radians(np.array(stars["RAmdeg"], dtype=float))
+        dec_rad = np.radians(np.array(stars["DEmdeg"], dtype=float))
+        mags = np.array(stars["VTmag"], dtype=float)
+    except Exception:
+        return None
 
+    # 转换到 3D 坐标
     x = np.cos(dec_rad) * np.cos(ra_rad)
     y = np.cos(dec_rad) * np.sin(ra_rad)
     z = np.sin(dec_rad)
 
-    # 用星等确定点的大小（越亮越大）
-    sizes = (14 - mags) * 3
-    sizes = np.clip(sizes, 2, 20)
+    # 用星等确定大小（越亮越大）
+    sizes = np.clip((14 - mags) * 8, 3, 60)
 
-    fig = go.Figure()
+    fig = plt.figure(figsize=(10, 10), facecolor="black")
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_facecolor("black")
 
-    # 添加恒星
-    fig.add_trace(go.Scatter3d(
-        x=x, y=y, z=z,
-        mode="markers",
-        marker=dict(
-            size=sizes,
-            color=mags,
-            colorscale="Viridis",
-            reversescale=True,
-            colorbar=dict(title="星等", x=0.9),
-            opacity=0.8,
-        ),
-        text=["星等: " + str(round(m, 2)) for m in mags],
-        hoverinfo="text",
-        name="恒星",
-    ))
+    # 画恒星
+    ax.scatter(x, y, z, s=sizes, c=mags, cmap="cividis", alpha=0.8, edgecolors="none")
 
-    # 添加候选体
-    if candidates is not None and ra_center is not None:
+    # 画候选体
+    if candidates is not None:
         cand_ra = np.radians(np.array([c["ra"] for c in candidates]))
         cand_dec = np.radians(np.array([c["dec"] for c in candidates]))
         cx = np.cos(cand_dec) * np.cos(cand_ra)
         cy = np.cos(cand_dec) * np.sin(cand_ra)
         cz = np.sin(cand_dec)
-        fig.add_trace(go.Scatter3d(
-            x=cx, y=cy, z=cz,
-            mode="markers",
-            marker=dict(size=15, color="red", symbol="diamond"),
-            text=["候选体 " + str(i+1) for i in range(len(candidates))],
-            hoverinfo="text",
-            name="候选体",
-        ))
+        ax.scatter(cx, cy, cz, s=200, c="red", marker="*", edgecolors="yellow", linewidths=2, zorder=10)
 
-    fig.update_layout(
-        scene=dict(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            zaxis=dict(visible=False),
-            bgcolor="#000000",
-        ),
-        paper_bgcolor="#000000",
-        font=dict(color="white"),
-        margin=dict(l=0, r=0, t=30, b=0),
-        height=600,
-        showlegend=True,
-    )
+    # 画球面网格
+    u = np.linspace(0, 2 * np.pi, 30)
+    v = np.linspace(0, np.pi, 15)
+    x_sphere = np.outer(np.cos(u), np.sin(v))
+    y_sphere = np.outer(np.sin(u), np.sin(v))
+    z_sphere = np.outer(np.ones(np.size(u)), np.cos(v))
+    ax.plot_wireframe(x_sphere, y_sphere, z_sphere, color="gray", alpha=0.15, linewidth=0.5)
 
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_zlim(-1, 1)
+    ax.set_axis_off()
+
+    plt.tight_layout()
     return fig
-
 
 
 
@@ -620,7 +602,7 @@ with tab2:
 
                 fig3d = make_3d_sky(stars, candidates=coords, ra_center=ra_c, dec_center=dec_c)
                 if fig3d is not None:
-                    st.plotly_chart(fig3d, use_container_width=True)
+                    st.pyplot(fig3d)
 
                 # 显示 2D Aitoff 投影
                 st.markdown("---")
