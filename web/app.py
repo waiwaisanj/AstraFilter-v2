@@ -29,7 +29,7 @@ except ImportError:
     Vizier = None
 
 
-st.set_page_config(page_title="AstraFilter", page_icon="web/astrafilter_favicon.png", layout="wide")
+st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
 
 # ===== 移动端响应式 CSS =====
 st.markdown("""
@@ -1486,9 +1486,14 @@ def detect_bright_stars(image, n_sigma=10, min_pixels=2, max_pixels=500, max_sta
 
 
 # ===== 页面 =====
-# Logo 显示
+# Logo 显示（用 __file__ 定位，兼容 Streamlit Cloud）
 try:
-    st.image("web/astrafilter_logo.png", width=120)
+    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _logo_path = os.path.join(_base, "web", "astrafilter_logo.png")
+    if os.path.exists(_logo_path):
+        _col_logo, _col_space = st.columns([1, 5])
+        with _col_logo:
+            st.image(_logo_path, width=120)
 except Exception:
     pass
 
