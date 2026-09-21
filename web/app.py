@@ -92,11 +92,11 @@ st.markdown("""
 # ===== 无障碍主题配置 =====
 THEMES = {
     "default": {
-        "name": "默认 (深色背景)",
-        "bg": "#0e1117",
-        "fg": "#fafafa",
-        "accent": "#ff4b4b",
-        "box_color": "#00ff00",
+        "name": "默认 (NASA 白底风格)",
+        "bg": "#ffffff",
+        "fg": "#0b3d91",
+        "accent": "#0b3d91",
+        "box_color": "#fc3d21",
         "colormap": "gray",
     },
     "high_contrast": {
@@ -309,6 +309,7 @@ def apply_accessibility_theme():
 
     css = f"""
     <style>
+    /* 全局 */
     .stApp {{
         background-color: {theme["bg"]};
         color: {theme["fg"]};
@@ -320,16 +321,125 @@ def apply_accessibility_theme():
     }}
     h1, h2, h3, h4 {{
         color: {theme["accent"]} !important;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        letter-spacing: 0.5px;
     }}
+
+    /* 顶部横幅（NASA 风格） */
+    .nasa-banner {{
+        background: linear-gradient(135deg, #0b3d91 0%, #1e3a8a 60%, #0b3d91 100%);
+        color: #ffffff;
+        padding: 2rem 2.5rem;
+        border-radius: 0;
+        margin: -1rem -1rem 1.5rem -1rem;
+        box-shadow: 0 4px 12px rgba(11, 61, 145, 0.15);
+        border-bottom: 4px solid #fc3d21;
+    }}
+    .nasa-banner h1 {{
+        color: #ffffff !important;
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }}
+    .nasa-banner p {{
+        color: #d0dcf0 !important;
+        margin: 0.5rem 0 0 0;
+        font-size: 1rem;
+    }}
+    .nasa-banner .nasa-dot {{
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        background: #fc3d21;
+        border-radius: 50%;
+        margin-right: 10px;
+        vertical-align: middle;
+    }}
+
+    /* 卡片 */
+    .nasa-card {{
+        background: #ffffff;
+        border: 1px solid #dde3ec;
+        border-left: 4px solid #0b3d91;
+        border-radius: 6px;
+        padding: 1.2rem 1.5rem;
+        margin: 0.8rem 0;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        transition: box-shadow 0.2s;
+    }}
+    .nasa-card:hover {{
+        box-shadow: 0 4px 14px rgba(11,61,145,0.12);
+    }}
+    .nasa-card h3 {{
+        margin-top: 0;
+        color: #0b3d91 !important;
+        font-size: 1.15rem;
+    }}
+    .nasa-card .source-tag {{
+        display: inline-block;
+        background: #fc3d21;
+        color: #ffffff;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-right: 8px;
+        letter-spacing: 0.5px;
+    }}
+    .nasa-card .date-tag {{
+        color: #6b7280;
+        font-size: 0.8rem;
+    }}
+
+    /* 按钮 */
     .stButton > button {{
         background-color: {theme["accent"]};
-        color: {theme["bg"]};
+        color: #ffffff;
         font-size: {font_size};
         font-weight: bold;
+        border: none;
+        border-radius: 4px;
+        padding: 0.6rem 1.2rem;
+        transition: background 0.2s;
+    }}
+    .stButton > button:hover {{
+        background-color: #fc3d21;
+    }}
+
+    /* Tab 导航（NASA 风格） */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 0;
+        border-bottom: 2px solid #dde3ec;
     }}
     .stTabs [data-baseweb="tab"] {{
         color: {theme["fg"]};
         font-size: {font_size};
+        font-weight: 600;
+        padding: 0.8rem 1.2rem;
+        border-radius: 0;
+        letter-spacing: 0.3px;
+    }}
+    .stTabs [aria-selected="true"] {{
+        background: transparent !important;
+        border-bottom: 3px solid #fc3d21 !important;
+        color: #0b3d91 !important;
+    }}
+
+    /* 侧边栏 */
+    section[data-testid="stSidebar"] {{
+        background: #f7f9fc;
+        border-right: 1px solid #dde3ec;
+    }}
+
+    /* 数据框 */
+    .dataframe {{
+        font-size: 0.85rem;
+    }}
+
+    /* 分隔线 */
+    hr {{
+        border-color: #dde3ec;
     }}
     </style>
     """
@@ -594,7 +704,13 @@ def detect_bright_stars(image, n_sigma=10, min_pixels=2, max_pixels=500, max_sta
 
 
 # ===== 页面 =====
-st.title("🔭 AstraFilter")
+# NASA 风格顶部横幅
+st.markdown("""
+<div class="nasa-banner">
+    <h1><span class="nasa-dot"></span>AstraFilter</h1>
+    <p>Fast-Moving Object Detection &amp; Astronomical Image Analysis Platform</p>
+</div>
+""", unsafe_allow_html=True)
 st.subheader("无障碍天文图像分析平台")
 
 # 无障碍设置面板
