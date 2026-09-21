@@ -133,6 +133,168 @@ FONT_SIZES = {
 }
 
 
+
+
+# ============ 多语言支持 ============
+LANG_STRINGS = {
+    "zh": {
+        "app_title": "AstraFilter",
+        "app_subtitle": "快速移动天体检测与验证平台",
+        "tab_home": "📰 首页",
+        "tab_detect": "🔍 检测",
+        "tab_sky": "🌌 星图",
+        "tab_meta": "📊 图像信息",
+        "tab_verify": "✅ 验证",
+        "tab_a11y": "♿ 无障碍",
+        "tab_photo": "📷 星空照片",
+        "tab_learn": "📚 学习",
+        "home_title": "欢迎使用 AstraFilter",
+        "home_desc": "AstraFilter 是一个免费、开源、可离线工作的天文图像分析平台。它可以检测天文图像中的快速移动天体（FMO），提供 3D 星图、多源验证、无障碍支持和科普教学。",
+        "news_title": "最新天文与航天新闻",
+        "news_loading": "正在加载最新新闻...",
+        "news_refresh": "刷新新闻",
+        "news_source": "来源",
+        "news_read_more": "阅读原文",
+        "quick_start": "快速开始",
+        "quick_start_desc": "点击上方「检测」标签，上传一张 FITS 或 PNG 图像即可开始。",
+        "features": "主要功能",
+        "feature_1": "条纹检测 — 上传图像，自动识别 FMO 条纹",
+        "feature_2": "3D 星图 — 用离线星表显示候选体附近的恒星",
+        "feature_3": "多源验证 — MPChecker、SkyBoT、JPL Horizons",
+        "feature_4": "无障碍 — 四种主题、语音描述、色盲友好",
+        "feature_5": "星空照片 — 手机拍的星空照片自动识别亮星",
+        "feature_6": "科普教学 — FMO 原理、检测方法讲解",
+        "language": "语言",
+    },
+    "en": {
+        "app_title": "AstraFilter",
+        "app_subtitle": "Fast-Moving Object Detection and Validation Platform",
+        "tab_home": "📰 Home",
+        "tab_detect": "🔍 Detection",
+        "tab_sky": "🌌 Sky Map",
+        "tab_meta": "📊 Metadata",
+        "tab_verify": "✅ Verification",
+        "tab_a11y": "♿ Accessibility",
+        "tab_photo": "📷 Photo",
+        "tab_learn": "📚 Learn",
+        "home_title": "Welcome to AstraFilter",
+        "home_desc": "AstraFilter is a free, open-source, offline-capable platform for astronomical image analysis. It detects Fast-Moving Objects (FMOs) in astronomical images and offers 3D sky maps, multi-source validation, accessibility support, and educational content.",
+        "news_title": "Latest Astronomy and Space News",
+        "news_loading": "Loading latest news...",
+        "news_refresh": "Refresh News",
+        "news_source": "Source",
+        "news_read_more": "Read more",
+        "quick_start": "Quick Start",
+        "quick_start_desc": "Click the Detection tab above and upload a FITS or PNG image to begin.",
+        "features": "Features",
+        "feature_1": "Streak Detection — Auto-detect FMO streaks in images",
+        "feature_2": "3D Sky Map — Show nearby stars using offline catalog",
+        "feature_3": "Multi-source Validation — MPChecker, SkyBoT, JPL Horizons",
+        "feature_4": "Accessibility — 4 themes, voice description, colorblind-friendly",
+        "feature_5": "Star Photo — Auto-detect bright stars in phone photos",
+        "feature_6": "Education — FMO principles and detection methods",
+        "language": "Language",
+    },
+}
+
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "zh"
+
+
+def t(key):
+    return LANG_STRINGS[st.session_state["lang"]].get(key, key)
+
+
+# ============ 实时天文新闻 ============
+@st.cache_data(ttl=3600)
+def fetch_astronomy_news():
+    """获取最新的天文和航天新闻，缓存 1 小时"""
+    news = []
+
+    # 源 1：Spaceflight News API（稳定、免费、无限制）
+    try:
+        r = requests.get(
+            "https://api.spaceflightnewsapi.net/v4/articles/",
+            params={"limit": 6, "ordering": "-published_at"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            for art in r.json().get("results", []):
+                news.append({
+                    "title": art.get("title", ""),
+                    "source": art.get("news_site", "Spaceflight News"),
+                    "url": art.get("url", ""),
+                    "published": art.get("published_at", "")[:10],
+                    "summary": (art.get("summary", "") or "")[:200],
+                })
+    except Exception:
+        pass
+
+    # 源 2：NASA 每日天文图片（APOD）
+    try:
+        r = requests.get(
+            "https://api.nasa.gov/planetary/apod",
+            params={"api_key": "DEMO_KEY"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            news.append({
+                "title": data.get("title", "NASA APOD"),
+                "source": "NASA APOD",
+                "url": data.get("url", "https://apod.nasa.gov/"),
+                "published": data.get("date", ""),
+                "summary": (data.get("explanation", "") or "")[:200],
+            })
+    except Exception:
+        pass
+
+    return news
+
+
+# ============ 离线星表 ============
+import os as _os
+
+_stars_cache = None
+
+
+def load_bright_stars():
+    global _stars_cache
+    if _stars_cache is not None:
+        return _stars_cache
+    try:
+        csv_path = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            "data", "bright_stars.csv"
+        )
+        if not _os.path.exists(csv_path):
+            return None
+        df = pd.read_csv(csv_path)
+        _stars_cache = df
+        return df
+    except Exception:
+        return None
+
+
+def query_stars_offline(ra, dec, radius_deg=1.0, max_mag=7.0):
+    df = load_bright_stars()
+    if df is None or len(df) == 0:
+        return None
+    ra_r = np.radians(df["ra"].values)
+    dec_r = np.radians(df["dec"].values)
+    ra_c = np.radians(ra)
+    dec_c = np.radians(dec)
+    cos_dist = np.sin(dec_c) * np.sin(dec_r) + np.cos(dec_c) * np.cos(dec_r) * np.cos(ra_r - ra_c)
+    cos_dist = np.clip(cos_dist, -1, 1)
+    dist_deg = np.degrees(np.arccos(cos_dist))
+    mask = (dist_deg < radius_deg) & (df["mag"] < max_mag)
+    result = df[mask].copy()
+    if len(result) == 0:
+        return None
+    result = result.rename(columns={"ra": "RAmdeg", "dec": "DEmdeg", "mag": "VTmag"})
+    return result
+
+
 def apply_accessibility_theme():
     """应用无障碍主题"""
     if "theme_key" not in st.session_state:
@@ -283,6 +445,53 @@ def generate_audio_description(candidates, data_shape):
 
 
 
+
+
+# ===== 离线星表 =====
+import os as _os
+
+_stars_cache = None
+
+def load_bright_stars():
+    """加载离线亮星表"""
+    global _stars_cache
+    if _stars_cache is not None:
+        return _stars_cache
+    try:
+        csv_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "bright_stars.csv")
+        if not _os.path.exists(csv_path):
+            return None
+        df = pd.read_csv(csv_path)
+        _stars_cache = df
+        return df
+    except Exception:
+        return None
+
+
+def query_stars_offline(ra, dec, radius_deg=1.0, max_mag=7.0):
+    """用离线星表查询天区内的恒星"""
+    df = load_bright_stars()
+    if df is None or len(df) == 0:
+        return None
+
+    ra_r = np.radians(df["ra"].values)
+    dec_r = np.radians(df["dec"].values)
+    ra_c = np.radians(ra)
+    dec_c = np.radians(dec)
+
+    cos_dist = np.sin(dec_c) * np.sin(dec_r) + np.cos(dec_c) * np.cos(dec_r) * np.cos(ra_r - ra_c)
+    cos_dist = np.clip(cos_dist, -1, 1)
+    dist_deg = np.degrees(np.arccos(cos_dist))
+
+    mask = (dist_deg < radius_deg) & (df["mag"] < max_mag)
+    result = df[mask].copy()
+    if len(result) == 0:
+        return None
+
+    result = result.rename(columns={"ra": "RAmdeg", "dec": "DEmdeg", "mag": "VTmag"})
+    return result
+
+
 def query_stars_around(ra, dec, radius_deg=1.0, max_mag=12):
     if not ASTROQUERY_AVAILABLE:
         return None
@@ -422,7 +631,62 @@ with st.sidebar:
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🔍 检测", "🌌 星图", "📊 图像信息", "✅ 验证", "♿ 无障碍", "📷 星空照片", "📚 学习"])
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([t("tab_home"), t("tab_detect"), t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn")])
+
+with tab0:
+    # 顶部语言切换
+    lang_options = ["中文", "English"]
+    current_idx = 0 if st.session_state["lang"] == "zh" else 1
+    lang_col1, lang_col2 = st.columns([4, 1])
+    with lang_col2:
+        chosen = st.selectbox(t("language"), lang_options, index=current_idx, key="lang_selector")
+        new_lang = "zh" if chosen == "中文" else "en"
+        if new_lang != st.session_state["lang"]:
+            st.session_state["lang"] = new_lang
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader(t("home_title"))
+    st.markdown(t("home_desc"))
+
+    st.markdown("---")
+    st.subheader("📰 " + t("news_title"))
+
+    col_a, col_b = st.columns([4, 1])
+    with col_b:
+        if st.button("🔄 " + t("news_refresh")):
+            st.cache_data.clear()
+
+    with st.spinner(t("news_loading")):
+        news = fetch_astronomy_news()
+
+    if len(news) == 0:
+        st.warning("无法获取最新新闻，请检查网络连接。")
+    else:
+        for i, item in enumerate(news):
+            with st.container():
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.markdown("### " + item["title"])
+                    st.caption(t("news_source") + ": " + item["source"] + " | " + item["published"])
+                    if item.get("summary"):
+                        st.write(item["summary"])
+                with c2:
+                    st.link_button(t("news_read_more"), item["url"])
+                st.markdown("---")
+
+    st.subheader("🚀 " + t("quick_start"))
+    st.markdown(t("quick_start_desc"))
+
+    st.markdown("---")
+    st.subheader(t("features"))
+    st.markdown("- " + t("feature_1"))
+    st.markdown("- " + t("feature_2"))
+    st.markdown("- " + t("feature_3"))
+    st.markdown("- " + t("feature_4"))
+    st.markdown("- " + t("feature_5"))
+    st.markdown("- " + t("feature_6"))
+
 
 with tab1:
     uploaded_file = st.file_uploader("上传 FITS 或普通图像", type=["fits", "fz", "png", "jpg", "jpeg"])
@@ -581,7 +845,11 @@ with tab2:
 
             if st.button("查询附近恒星"):
                 with st.spinner("查询中..."):
-                    stars = query_stars_around(ra_center, dec_center, radius, max_mag)
+                    # 优先用离线星表
+                    stars = query_stars_offline(ra_center, dec_center, radius, max_mag)
+                    if stars is None or len(stars) == 0:
+                        # 备用：在线查询
+                        stars = query_stars_around(ra_center, dec_center, radius, max_mag)
                 if stars is None or len(stars) == 0:
                     st.warning("没有找到恒星，可尝试增大查询半径或提高最大星等。")
                 else:
