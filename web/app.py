@@ -1258,6 +1258,112 @@ def generate_discovery_certificate(candidate, image_data, wcs, detection_date=No
     return html, cert_id
 
 
+
+# ============ 本地 FAQ 智能助手 ============
+FAQ_DATABASE = [
+    {
+        "keywords": ["上传", "什么图", "用什么图", "upload", "输入"],
+        "question": "我该上传什么图像？",
+        "answer": "最好的输入是带 WCS 信息的 FITS 文件（可以从 NASA/IPAC IRSA 的 ZTF 档案下载）。如果只是想试试检测功能，PNG/JPG 也可以，但没有坐标信息，无法做天球坐标转换。\n\n下载 FITS 地址：https://irsa.ipac.caltech.edu/Missions/ztf.html",
+    },
+    {
+        "keywords": ["没有检测", "检测不到", "0 个", "找不到", "空"],
+        "question": "检测不到候选体怎么办？",
+        "answer": "尝试以下调整：\n1) 把左侧「亮度阈值」从 5.0 降到 3.0 或 4.0\n2) 把「最小长度」从 15 降到 8 像素\n3) 把「最小线性度」从 3.0 降到 2.0\n\n如果还是 0 个，说明图像里可能确实没有符合特征的条纹——这也是正确的科学结果。",
+    },
+    {
+        "keywords": ["候选体太多", "太多候选", "很多候选", "假阳性", "误报", "噪声"],
+        "question": "候选体太多怎么筛选？",
+        "answer": "调高参数能过滤掉大部分伪影：\n1) 「最小线性度」提到 4.0 或更高（真条纹线性度通常 > 5）\n2) 「亮度阈值」提到 6.0 或 7.0 sigma\n3) 「最小长度」提到 20 像素以上\n\n真正的快速移动天体条纹通常又细又长，线性度很高。",
+    },
+    {
+        "keywords": ["mpchecker", "验证", "已知天体", "查询"],
+        "question": "MPChecker 是什么？怎么用？",
+        "answer": "MPChecker 是小行星中心的官方数据库，包含所有已知小行星和彗星的轨道数据。\n\n用法：把候选体的 RA/Dec 坐标输入 MPChecker，如果在 5 角分范围内返回 No known minor planets，说明这个位置附近没有已知天体——你的候选体可能是新的。\n\n注意：需要 FITS 文件带 WCS 信息才能算出坐标。",
+    },
+    {
+        "keywords": ["什么是 fmo", "fmo 是什么", "快速移动", "fast moving"],
+        "question": "什么是 FMO？",
+        "answer": "FMO（Fast-Moving Object，快速移动天体）指运动速率超过 0.5 度/天的太阳系小天体。\n\n主要包括：\n- 近地小行星（NEA）：轨道接近地球，行星防御重点\n- 主带小行星：速率小于 0.5 度/天\n- 人造卫星和空间碎片\n\n在 ZTF 的 30 秒曝光中，FMO 会留下细长的条纹，而恒星和星系呈点状。这就是为什么用条纹来识别 FMO。",
+    },
+    {
+        "keywords": ["坐标", "ra", "dec", "赤经", "赤纬"],
+        "question": "什么是 RA/Dec 坐标？",
+        "answer": "RA（赤经）和 Dec（赤纬）是天球坐标系，类似地球的经度和纬度。\n\n- RA：从春分点开始，0-360 度，或 0-24 小时\n- Dec：从天赤道开始，-90 到 +90 度\n\n只有在 FITS 文件包含 WCS 信息时，才能把像素坐标转换成天球坐标。",
+    },
+    {
+        "keywords": ["证书", "发现证书", "certificate"],
+        "question": "怎么生成发现证书？",
+        "answer": "步骤：\n1) 在「检测」标签页上传图像\n2) 检测候选体\n3) 在候选体列表下方找到「生成发现证书」区域\n4) 选择候选体，填入你的名字和日期\n5) 点「生成发现证书」按钮\n\n会生成一份精美的 HTML 证书，可以下载、打印或分享。",
+    },
+    {
+        "keywords": ["星图", "3d 星图", "恒星", "星空"],
+        "question": "星图功能怎么用？",
+        "answer": "「星图」标签页显示候选体附近的已知恒星。\n\n步骤：\n1) 先在「检测」标签页上传带 WCS 的 FITS 文件\n2) 检测到候选体\n3) 切到「星图」标签\n4) 点「查询附近恒星」\n\n系统使用离线星表（15397 颗 Hipparcos 亮星），不需要网络，几秒就返回结果。可以拖动 3D 视图旋转视角。",
+    },
+    {
+        "keywords": ["无障碍", "色盲", "视障", "老人"],
+        "question": "有哪些无障碍功能？",
+        "answer": "「无障碍」标签页提供：\n1) 色盲模拟器：显示 4 种视图（正常、红盲、绿盲、蓝盲）\n2) 语音朗读：把检测结果读出来\n3) 四种配色主题：默认、高对比度、色盲友好、浅色\n4) 四档字体大小\n\n左侧栏可以切换主题和字体。这个功能帮助色盲和视障用户也能使用天文工具。",
+    },
+    {
+        "keywords": ["模拟器", "学习", "教学", "科普"],
+        "question": "互动模拟器怎么用？",
+        "answer": "「学习」标签页有互动模拟器，可以调节 6 个参数：\n- 条纹亮度\n- 运动速率（度/天）\n- 曝光时间（秒）\n- 背景噪声\n- PSF 模糊\n- 像素尺度\n\n每调一次参数，实时看到条纹如何形成，以及检测器如何识别。这是理解 FMO 检测原理的最佳工具。",
+    },
+    {
+        "keywords": ["ztf", "巡天", "望远镜", "帕洛马"],
+        "question": "ZTF 是什么？",
+        "answer": "ZTF（Zwicky Transient Facility）是位于美国帕洛马天文台的一台宽视场巡天望远镜。\n\n特点：\n- 每 3 天扫描一次北半球天空\n- 每晚产生约 30 万条条纹候选体\n- 数据完全公开，存档在 NASA 的 IRSA\n\nAstraFilter 使用的就是 ZTF 的公开数据。",
+    },
+    {
+        "keywords": ["追踪", "多夜", "跨夜", "历史观测"],
+        "question": "跨夜追踪怎么用？",
+        "answer": "「追踪」标签页可以查询 ZTF 档案，找到同一天区在其他夜晚的观测。\n\n步骤：\n1) 上传并检测候选体\n2) 切到「追踪」标签\n3) 选择日期范围\n4) 点「查询并追踪」\n\n系统会显示该天区的所有历史观测，并按日期分组。",
+    },
+    {
+        "keywords": ["logo", "标志", "设计"],
+        "question": "Logo 是什么意思？",
+        "answer": "AstraFilter 的 Logo 是星际穿越电影里 Gargantua 黑洞的造型：\n- 中心的黑色圆是黑洞视界\n- 金色的环是光子环\n- 水平的光带是吸积盘\n- 右上角的小火箭代表人类探索\n\n设计理念：用科学和科幻的融合，表达天文探索的精神。",
+    },
+    {
+        "keywords": ["你好", "hi", "hello", "在吗", "帮助", "help"],
+        "question": "有什么可以帮你？",
+        "answer": "你好！我是 AstraFilter 的助手。我可以帮你解答：\n\n📷 怎么上传图像、检测候选体\n🔍 检测结果怎么解读\n📊 怎么筛选候选体\n🔭 追踪 / 星图 / 验证功能怎么用\n♿ 无障碍功能说明\n📚 FMO 和天文基础知识\n\n直接问我就行，或者点下面的快捷问题按钮。",
+    },
+    {
+        "keywords": ["谢谢", "感谢", "thank"],
+        "question": "不客气",
+        "answer": "不客气！如果还有其他问题，随时问我。祝你在 AstraFilter 上有所发现！",
+    },
+]
+
+
+def find_faq_answer(question):
+    """在 FAQ 数据库里找最匹配的答案"""
+    q = question.lower().strip()
+    if not q:
+        return None, None
+    best_match = None
+    best_score = 0
+    for faq in FAQ_DATABASE:
+        score = 0
+        for kw in faq["keywords"]:
+            if kw in q:
+                score += len(kw)
+        if score > best_score:
+            best_score = score
+            best_match = faq
+    if best_match and best_score > 0:
+        return best_match["answer"], best_match["question"]
+    return None, None
+
+
+def get_fallback_answer():
+    return "抱歉，我没有找到这个问题的答案。\n\n你可以试试问：\n• 我该上传什么图像？\n• 检测不到候选体怎么办？\n• 候选体太多怎么筛选？\n• 什么是 FMO？\n• MPChecker 是什么？\n• 怎么生成发现证书？\n• 有哪些无障碍功能？"
+
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -2399,3 +2505,68 @@ ZTF 的 30 秒曝光中，静止的恒星和星系呈现为点源，而 FMO 会�
     """)
 
 
+
+
+with tab9:
+    st.header("🤖 AstraFilter 助手")
+    st.markdown("有任何关于 AstraFilter 或天文的问题，都可以在这里问。完全离线运行，不需要网络。")
+
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
+
+    for msg in st.session_state["chat_history"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input = st.chat_input("问点什么...")
+
+    if user_input:
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        st.session_state["chat_history"].append({"role": "user", "content": user_input})
+        with st.chat_message("assistant"):
+            answer, matched_q = find_faq_answer(user_input)
+            if answer is None:
+                answer = get_fallback_answer()
+                st.markdown(answer)
+            else:
+                st.markdown(answer)
+                st.caption("💡 匹配到 FAQ：" + str(matched_q))
+        st.session_state["chat_history"].append({"role": "assistant", "content": answer})
+
+    if len(st.session_state["chat_history"]) == 0:
+        st.markdown("---")
+        st.subheader("💡 试试这些问题：")
+        quick_questions = [
+            "我该上传什么图像？",
+            "检测不到候选体怎么办？",
+            "候选体太多怎么筛选？",
+            "什么是 FMO？",
+            "MPChecker 是什么？",
+            "怎么生成发现证书？",
+            "星图功能怎么用？",
+            "有哪些无障碍功能？",
+            "互动模拟器怎么用？",
+            "ZTF 是什么？",
+            "跨夜追踪怎么用？",
+            "有什么可以帮你？",
+        ]
+        cols = st.columns(3)
+        for i, q in enumerate(quick_questions):
+            with cols[i % 3]:
+                if st.button(q, key="quick_q_" + str(i)):
+                    st.session_state["chat_history"].append({"role": "user", "content": q})
+                    ans, _ = find_faq_answer(q)
+                    if ans is None:
+                        ans = get_fallback_answer()
+                    st.session_state["chat_history"].append({"role": "assistant", "content": ans})
+                    st.rerun()
+
+    if len(st.session_state["chat_history"]) > 0:
+        st.markdown("---")
+        if st.button("🗑 清空对话"):
+            st.session_state["chat_history"] = []
+            st.rerun()
+
+    st.markdown("---")
+    st.caption("AstraFilter 助手完全离线运行，包含 " + str(len(FAQ_DATABASE)) + " 组常见问题。")
