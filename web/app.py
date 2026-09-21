@@ -315,38 +315,38 @@ def apply_accessibility_theme():
         color: {theme["fg"]};
         font-size: {font_size};
     }}
-        .stMarkdown p, .stText p, p {
+        .stMarkdown p, .stText p, p {{
         color: #1f2328 !important;
-    }
-    .nasa-banner h1, .nasa-banner p, .nasa-banner span {
+    }}
+    .nasa-banner h1, .nasa-banner p, .nasa-banner span {{
         color: #ffffff !important;
-    }
+    }}
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] label {
+    section[data-testid="stSidebar"] label {{
         color: #1f2328 !important;
-    }
-    [data-testid="stMetricValue"] {
+    }}
+    [data-testid="stMetricValue"] {{
         color: #0b3d91 !important;
-    }
-    [data-testid="stMetricLabel"] {
+    }}
+    [data-testid="stMetricLabel"] {{
         color: #4a5568 !important;
-    }
+    }}
     .stSelectbox label, .stTextInput label, .stSlider label,
-    .stNumberInput label, .stFileUploader label, .stCheckbox label {
+    .stNumberInput label, .stFileUploader label, .stCheckbox label {{
         color: #1f2328 !important;
-    }
-    .stTabs [data-baseweb="tab"] {
+    }}
+    .stTabs [data-baseweb="tab"] {{
         color: #4a5568 !important;
-    }
-    .stTabs [aria-selected="true"] {
+    }}
+    .stTabs [aria-selected="true"] {{
         color: #0b3d91 !important;
-    }
-    .stButton > button, .stDownloadButton > button {
+    }}
+    .stButton > button, .stDownloadButton > button {{
         color: #ffffff !important;
-    }
+    }}
     h1, h2, h3, h4 {{
-        color: {theme["accent"]} !important;
+        color: {{theme["accent"]}} !important;
         font-family: 'Helvetica Neue', Arial, sans-serif;
         letter-spacing: 0.5px;
     }}
@@ -420,9 +420,9 @@ def apply_accessibility_theme():
 
     /* 按钮 */
     .stButton > button {{
-        background-color: {theme["accent"]};
+        background-color: {{theme["accent"]}};
         color: #ffffff;
-        font-size: {font_size};
+        font-size: {{font_size}};
         font-weight: bold;
         border: none;
         border-radius: 4px;
@@ -439,8 +439,8 @@ def apply_accessibility_theme():
         border-bottom: 2px solid #dde3ec;
     }}
     .stTabs [data-baseweb="tab"] {{
-        color: {theme["fg"]};
-        font-size: {font_size};
+        color: {{theme["fg"]}};
+        font-size: {{font_size}};
         font-weight: 600;
         padding: 0.8rem 1.2rem;
         border-radius: 0;
