@@ -1364,6 +1364,153 @@ def get_fallback_answer():
 
 
 
+
+# ============ 科学有效性验证 ============
+
+def generate_synthetic_streak(brightness, length, angle_deg, image_size=128):
+    """生成一个带条纹的合成图像"""
+    from scipy.ndimage import gaussian_filter
+    image = np.random.normal(0, 5.0, (image_size, image_size))
+    angle = np.radians(angle_deg)
+    cx, cy = image_size // 2, image_size // 2
+    n_steps = max(5, length * 3)
+    streak = np.zeros_like(image)
+    for step in np.linspace(-length / 2, length / 2, n_steps):
+        x = int(round(cx + step * np.cos(angle)))
+        y = int(round(cy + step * np.sin(angle)))
+        if 0 <= x < image_size and 0 <= y < image_size:
+            streak[y, x] = brightness
+    streak = gaussian_filter(streak, sigma=1.5)
+    return image + streak, streak
+
+
+def run_validation_test(n_samples=200, brightness_range=(10, 80), length_range=(10, 50)):
+    """运行科学有效性验证"""
+    results = {
+        "true_positives": 0,
+        "false_negatives": 0,
+        "total_positive": 0,
+        "false_positives": 0,
+        "total_negative": 0,
+        "detections_by_brightness": {},
+        "detections_by_length": {},
+    }
+
+    # 1. 完整率测试：有真实条纹
+    for i in range(n_samples):
+        brightness = np.random.randint(brightness_range[0], brightness_range[1])
+        length = np.random.randint(length_range[0], length_range[1])
+        angle = np.random.uniform(0, 180)
+
+        image, streak_mask = generate_synthetic_streak(brightness, length, angle)
+
+        candidates = detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0)
+
+        # 检查是否检测到（在中心附近）
+        detected = False
+        for c in candidates:
+            if abs(c["x"] - 64) < 20 and abs(c["y"] - 64) < 20:
+                detected = True
+                break
+
+        results["total_positive"] += 1
+        if detected:
+            results["true_positives"] += 1
+        else:
+            results["false_negatives"] += 1
+
+        # 按亮度统计
+        b_bin = (brightness // 10) * 10
+        if b_bin not in results["detections_by_brightness"]:
+            results["detections_by_brightness"][b_bin] = {"total": 0, "detected": 0}
+        results["detections_by_brightness"][b_bin]["total"] += 1
+        if detected:
+            results["detections_by_brightness"][b_bin]["detected"] += 1
+
+        # 按长度统计
+        l_bin = (length // 10) * 10
+        if l_bin not in results["detections_by_length"]:
+            results["detections_by_length"][l_bin] = {"total": 0, "detected": 0}
+        results["detections_by_length"][l_bin]["total"] += 1
+        if detected:
+            results["detections_by_length"][l_bin]["detected"] += 1
+
+    # 2. 假阳性率测试：纯噪声
+    n_neg = n_samples // 2
+    for i in range(n_neg):
+        image = np.random.normal(0, 5.0, (128, 128))
+        candidates = detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0)
+        results["total_negative"] += 1
+        if len(candidates) > 0:
+            results["false_positives"] += 1
+
+    # 计算指标
+    tp = results["true_positives"]
+    fn = results["false_negatives"]
+    fp = results["false_positives"]
+    tn = results["total_negative"] - fp
+
+    results["completeness"] = tp / (tp + fn) if (tp + fn) > 0 else 0
+    results["precision"] = tp / (tp + fp) if (tp + fp) > 0 else 0
+    results["f1_score"] = 2 * results["precision"] * results["completeness"] / (results["precision"] + results["completeness"]) if (results["precision"] + results["completeness"]) > 0 else 0
+    results["false_positive_rate"] = fp / (fp + tn) if (fp + tn) > 0 else 0
+
+    return results
+
+
+def make_validation_charts(results):
+    """生成验证结果图表"""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    # 图 1：完整率 vs 亮度
+    brightness_bins = sorted(results["detections_by_brightness"].keys())
+    brightness_rates = []
+    brightness_counts = []
+    for b in brightness_bins:
+        d = results["detections_by_brightness"][b]
+        rate = d["detected"] / d["total"] if d["total"] > 0 else 0
+        brightness_rates.append(rate)
+        brightness_counts.append(d["total"])
+
+    axes[0].bar(brightness_bins, brightness_rates, color="#0b3d91", edgecolor="black")
+    axes[0].set_xlabel("Brightness (relative to background)", fontsize=12)
+    axes[0].set_ylabel("Detection rate", fontsize=12)
+    axes[0].set_title("Detection rate vs brightness", fontsize=13, fontweight="bold")
+    axes[0].set_ylim(0, 1.05)
+    axes[0].grid(True, alpha=0.3, axis="y")
+
+    # 图 2：完整率 vs 长度
+    length_bins = sorted(results["detections_by_length"].keys())
+    length_rates = []
+    for l in length_bins:
+        d = results["detections_by_length"][l]
+        rate = d["detected"] / d["total"] if d["total"] > 0 else 0
+        length_rates.append(rate)
+
+    axes[1].bar(length_bins, length_rates, color="#fc3d21", edgecolor="black")
+    axes[1].set_xlabel("Streak length (pixels)", fontsize=12)
+    axes[1].set_ylabel("Detection rate", fontsize=12)
+    axes[1].set_title("Detection rate vs streak length", fontsize=13, fontweight="bold")
+    axes[1].set_ylim(0, 1.05)
+    axes[1].grid(True, alpha=0.3, axis="y")
+
+    # 图 3：总结指标
+    metrics = ["Completeness", "Precision", "F1 Score", "False Positive Rate"]
+    values = [results["completeness"], results["precision"], results["f1_score"], results["false_positive_rate"]]
+    colors = ["#0b3d91", "#fc3d21", "#4db8ff", "#888888"]
+
+    bars = axes[2].bar(metrics, values, color=colors, edgecolor="black")
+    axes[2].set_ylabel("Score", fontsize=12)
+    axes[2].set_title("Overall performance metrics", fontsize=13, fontweight="bold")
+    axes[2].set_ylim(0, 1.05)
+    axes[2].grid(True, alpha=0.3, axis="y")
+    for bar, val in zip(bars, values):
+        axes[2].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02, f"{val:.2f}", ha="center", fontsize=11, fontweight="bold")
+
+    plt.tight_layout()
+    return fig
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -1672,7 +1819,7 @@ with st.sidebar:
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 
-tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([t("tab_home"), t("tab_detect"), "🔭 追踪", t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn"), "🤖 助手"])
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([t("tab_home"), t("tab_detect"), "🔭 追踪", t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn"), "🤖 助手", "🧪 验证"])
 
 with tab0:
     # 顶部语言切换
@@ -2570,3 +2717,87 @@ with tab9:
 
     st.markdown("---")
     st.caption("AstraFilter 助手完全离线运行，包含 " + str(len(FAQ_DATABASE)) + " 组常见问题。")
+
+
+with tab10:
+    st.header("🧪 科学有效性验证")
+    st.markdown("这一页展示 AstraFilter 检测器的统计学性能。我们用大量已知答案的合成图像测试检测器，计算它的完整率、精确率和假阳性率。这是把'我的工具能用'变成'我的工具在统计上被验证'的关键一步。")
+
+    st.markdown("---")
+    st.subheader("测试方法")
+    st.markdown("""
+**完整率测试**：生成 200 个带真实条纹的合成图像，亮度随机 10-80，长度随机 10-50 像素。看检测器能找到多少个。
+
+**假阳性率测试**：生成 100 个纯噪声图像（无条纹）。看检测器误报多少个。
+
+**统计指标**：
+- **完整率（Completeness）** = 真实条纹中检测到的比例。越高越好。
+- **精确率（Precision）** = 检测到的候选体中是真实条纹的比例。越高越好。
+- **F1 分数** = 完整率和精确率的调和平均。
+- **假阳性率** = 纯噪声图像中误报的比例。越低越好。
+    """)
+
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        n_samples = st.slider("测试样本数", 50, 500, 200, 50)
+    with col2:
+        st.write("")
+        st.write("")
+        run_test = st.button("▶ 开始验证测试", type="primary")
+
+    if run_test:
+        with st.spinner("运行中... 大约需要 1-2 分钟"):
+            results = run_validation_test(n_samples=n_samples)
+
+        st.markdown("---")
+        st.subheader("📊 测试结果")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("完整率", f"{results['completeness']:.3f}")
+        c2.metric("精确率", f"{results['precision']:.3f}")
+        c3.metric("F1 分数", f"{results['f1_score']:.3f}")
+        c4.metric("假阳性率", f"{results['false_positive_rate']:.3f}")
+
+        st.markdown("**原始数据**")
+        st.write(f"- 真实条纹数: {results['total_positive']}")
+        st.write(f"- 正确检测数: {results['true_positives']}")
+        st.write(f"- 漏检数: {results['false_negatives']}")
+        st.write(f"- 纯噪声图像数: {results['total_negative']}")
+        st.write(f"- 误报数: {results['false_positives']}")
+
+        st.markdown("---")
+        st.subheader("📈 可视化")
+
+        fig = make_validation_charts(results)
+        st.pyplot(fig)
+
+        st.markdown("---")
+        st.subheader("💡 结果解读")
+
+        if results["completeness"] > 0.7:
+            st.success(f"完整率 {results['completeness']:.1%}，检测器能发现大部分条纹。")
+        elif results["completeness"] > 0.4:
+            st.warning(f"完整率 {results['completeness']:.1%}，检测器能发现约一半条纹。")
+        else:
+            st.error(f"完整率 {results['completeness']:.1%}，检测器性能较低。")
+
+        if results["false_positive_rate"] < 0.1:
+            st.success(f"假阳性率 {results['false_positive_rate']:.1%}，误报很少。")
+        elif results["false_positive_rate"] < 0.3:
+            st.warning(f"假阳性率 {results['false_positive_rate']:.1%}，有一定误报。")
+        else:
+            st.error(f"假阳性率 {results['false_positive_rate']:.1%}，误报较多。")
+
+        st.info("""
+**为什么这个测试重要？**
+
+在科学中，"我的方法有效"不是靠感觉，而是靠数据。这个验证展示了：
+
+1. **检测器在不同亮度下的表现** — 帮助用户理解它的适用范围
+2. **检测器在不同长度下的表现** — 帮助用户知道哪些目标能被检测到
+3. **统计指标** — 让用户对检测结果有信心
+
+这些指标可以和论文里发表的检测器（如 DeepStreaks）做对比，评估 AstraFilter 的竞争力。
+        """)
+
