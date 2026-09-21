@@ -529,6 +529,124 @@ def infer_physical_properties(velocity_deg_per_day):
         }
 
 
+
+
+# ============ 色盲模拟 ============
+def simulate_color_vision_deficiency(image, deficiency="deuteranopia"):
+    """模拟不同类型的色盲看到的图像
+
+    参数:
+        image: 2D numpy 数组（灰度）
+        deficiency: 'protanopia' (红盲), 'deuteranopia' (绿盲), 'tritanopia' (蓝盲)
+
+    返回:
+        模拟的 RGB 图像
+    """
+    # 先把灰度图转成伪彩色（用 matplotlib 的 plasma 色谱，色彩丰富）
+    import matplotlib.cm as cm
+    med = np.median(image)
+    std = np.std(image)
+    normalized = np.clip((image - med) / (std * 3), 0, 1)
+    colored = cm.plasma(normalized)[:, :, :3]  # RGB, 0-1
+
+    # 色盲转换矩阵（Brettel-Viénot-Mollon 简化版）
+    matrices = {
+        "protanopia": np.array([
+            [0.567, 0.433, 0.000],
+            [0.558, 0.442, 0.000],
+            [0.000, 0.242, 0.758],
+        ]),
+        "deuteranopia": np.array([
+            [0.625, 0.375, 0.000],
+            [0.700, 0.300, 0.000],
+            [0.000, 0.300, 0.700],
+        ]),
+        "tritanopia": np.array([
+            [0.950, 0.050, 0.000],
+            [0.000, 0.433, 0.567],
+            [0.000, 0.475, 0.525],
+        ]),
+    }
+
+    if deficiency not in matrices:
+        return colored
+
+    m = matrices[deficiency]
+    h, w, _ = colored.shape
+    flattened = colored.reshape(-1, 3)
+    transformed = flattened @ m.T
+    transformed = np.clip(transformed, 0, 1)
+    return transformed.reshape(h, w, 3)
+
+
+def make_cvd_comparison(image):
+    """生成 4 格对比图：正常 / 红盲 / 绿盲 / 蓝盲"""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+
+    # 正常
+    import matplotlib.cm as cm
+    med = np.median(image)
+    std = np.std(image)
+    normalized = np.clip((image - med) / (std * 3), 0, 1)
+    colored = cm.plasma(normalized)[:, :, :3]
+
+    axes[0, 0].imshow(colored)
+    axes[0, 0].set_title("正常视觉 (Normal Vision)", fontsize=14, fontweight="bold")
+    axes[0, 0].axis("off")
+
+    axes[0, 1].imshow(simulate_color_vision_deficiency(image, "protanopia"))
+    axes[0, 1].set_title("红色盲 (Protanopia)", fontsize=14, fontweight="bold")
+    axes[0, 1].axis("off")
+
+    axes[1, 0].imshow(simulate_color_vision_deficiency(image, "deuteranopia"))
+    axes[1, 0].set_title("绿色盲 (Deuteranopia)", fontsize=14, fontweight="bold")
+    axes[1, 0].axis("off")
+
+    axes[1, 1].imshow(simulate_color_vision_deficiency(image, "tritanopia"))
+    axes[1, 1].set_title("蓝色盲 (Tritanopia)", fontsize=14, fontweight="bold")
+    axes[1, 1].axis("off")
+
+    plt.tight_layout()
+    return fig
+
+
+def make_audio_script(candidates, data_shape, lang="zh"):
+    """生成语音朗读脚本"""
+    if len(candidates) == 0:
+        return "未检测到候选体。" if lang == "zh" else "No candidates detected."
+
+    h, w = data_shape
+    parts = []
+
+    if lang == "zh":
+        parts.append(f"检测到 {len(candidates)} 个候选体。")
+        for i, c in enumerate(candidates):
+            x_ratio = c["x"] / w
+            y_ratio = c["y"] / h
+            x_desc = "左侧" if x_ratio < 0.33 else ("中央" if x_ratio < 0.67 else "右侧")
+            y_desc = "上方" if y_ratio < 0.33 else ("中部" if y_ratio < 0.67 else "下方")
+            lin = c["linearity"]
+            lin_desc = "非常细长" if lin > 10 else ("较细长" if lin > 5 else "一般")
+            parts.append(
+                f"候选体 {i+1}，位于{y_desc}{x_desc}，长度 {c['length']} 像素，"
+                f"线性度 {lin:.1f}，{lin_desc}。"
+            )
+    else:
+        parts.append(f"Detected {len(candidates)} candidates.")
+        for i, c in enumerate(candidates):
+            x_ratio = c["x"] / w
+            y_ratio = c["y"] / h
+            x_desc = "left" if x_ratio < 0.33 else ("center" if x_ratio < 0.67 else "right")
+            y_desc = "top" if y_ratio < 0.33 else ("middle" if y_ratio < 0.67 else "bottom")
+            lin = c["linearity"]
+            parts.append(
+                f"Candidate {i+1}: {y_desc} {x_desc}, length {c['length']} pixels, "
+                f"linearity {lin:.1f}."
+            )
+
+    return " ".join(parts)
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -1222,29 +1340,115 @@ with tab5:
 
 
 with tab6:
-    st.header("♿ 无障碍功能说明")
+    st.header("♿ 无障碍功能")
+
     st.markdown("""
-AstraFilter 为色盲和视觉障碍用户提供了以下功能：
+AstraFilter 为色盲、视障和老年用户提供了多项无障碍功能。这些功能让天文图像分析对所有人开放。
+    """)
 
-### 配色主题
-- **默认**：深色背景，适合夜间使用
-- **高对比度**：黑白配色，对比度最高，适合低视力用户
-- **色盲友好**：蓝橙配色（cividis 色谱），红绿色盲用户可区分
-- **浅色**：白底黑字，适合强光环境
+    st.markdown("---")
+    st.subheader("1. 配色主题")
+    st.markdown("""
+在左侧栏切换配色主题：
+- **默认（NASA 白底）** — 白底深蓝字，高可读性
+- **高对比度** — 纯黑底白字，适合低视力用户
+- **色盲友好** — 蓝橙配色，红绿色盲用户可区分
+- **浅色** — 白底黑字，适合强光环境
+    """)
 
-### 字体大小
-- 小 / 中 / 大 / 超大，可在左侧栏调整
+    st.markdown("---")
+    st.subheader("2. 字体大小")
+    st.markdown("左侧栏可切换小 / 中 / 大 / 超大四档字体大小，适合不同视力水平。")
 
-### 语音描述
-- 开启后，检测结果会生成文字描述，说明每个候选体的位置、长度和线性度
-- 兼容屏幕阅读器（NVDA、JAWS、VoiceOver）
+    st.markdown("---")
+    st.subheader("3. 语音朗读检测结果")
+    st.markdown("把检测结果转成语音，用手机或电脑扬声器朗读出来。")
 
-### 音频化检测结果
-- 候选体位置用文字描述："左侧"、"中央"、"右侧"、"上方"、"下方"
-- 线性度用文字描述："非常细长"、"较细长"、"一般"
+    candidates_for_audio = st.session_state.get("candidates", [])
+    data_for_audio = st.session_state.get("data")
 
-### 设计理念
-传统天文软件假设用户能看见屏幕上的彩色图像。对于色盲和视障用户，这些软件几乎不可用。AstraFilter 通过多主题配色、可调字体、语音描述和音频化检测结果，让天文图像分析对所有人开放。
+    if len(candidates_for_audio) == 0 or data_for_audio is None:
+        st.info("请先在检测标签页上传图像并检测候选体。")
+    else:
+        audio_script = make_audio_script(
+            candidates_for_audio,
+            data_for_audio.shape,
+            lang=st.session_state.get("lang", "zh"),
+        )
+        st.markdown("**朗读内容（预览）:**")
+        st.info(audio_script)
+
+        # 嵌入 JavaScript 的语音朗读
+        import streamlit.components.v1 as components
+        html_code = f"""
+        <button onclick="speakText()" style="background:#0b3d91;color:white;border:none;
+                padding:12px 24px;font-size:16px;border-radius:4px;cursor:pointer;font-weight:bold;">
+            🔊 点击朗读
+        </button>
+        <button onclick="stopSpeak()" style="background:#fc3d21;color:white;border:none;
+                padding:12px 24px;font-size:16px;border-radius:4px;cursor:pointer;margin-left:10px;font-weight:bold;">
+            ⏹ 停止
+        </button>
+        <script>
+        function speakText() {{
+            window.speechSynthesis.cancel();
+            var utterance = new SpeechSynthesisUtterance(`{audio_script}`);
+            utterance.lang = "{("zh-CN" if st.session_state.get("lang", "zh") == "zh" else "en-US")}";
+            utterance.rate = 0.9;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }}
+        function stopSpeak() {{
+            window.speechSynthesis.cancel();
+        }}
+        </script>
+        """
+        components.html(html_code, height=100)
+
+    st.markdown("---")
+    st.subheader("4. 色盲模拟器")
+    st.markdown("""
+上传的图像会以伪彩色显示，并模拟不同色盲类型看到的画面。
+这个工具可以帮助天文教育工作者了解色盲学生看到的是什么。
+    """)
+
+    if data_for_audio is None:
+        st.info("请先在检测标签页上传图像。")
+    else:
+        if st.button("生成色盲模拟对比图"):
+            with st.spinner("生成中..."):
+                fig_cvd = make_cvd_comparison(data_for_audio)
+            st.pyplot(fig_cvd)
+            st.markdown("""
+**说明**：
+- **正常视觉** — 大多数人看到的画面
+- **红色盲** — 约 1% 的男性，难以区分红绿
+- **绿色盲** — 约 5% 的男性，红绿混淆
+- **蓝色盲** — 罕见，蓝黄混淆
+
+如果一个条纹在某种色盲模式下消失，说明该用户需要其他提示方式（如语音或文字描述）才能看到它。
+            """)
+
+    st.markdown("---")
+    st.subheader("5. 键盘导航")
+    st.markdown("""
+AstraFilter 支持屏幕阅读器（NVDA、JAWS、VoiceOver）。
+所有交互元素都有语义标签，可以用 Tab 键导航，Enter 键激活。
+    """)
+
+    st.markdown("---")
+    st.subheader("设计理念")
+    st.markdown("""
+传统天文软件假设用户能看见彩色屏幕。对于色盲和视障用户，这些软件几乎不可用。
+
+AstraFilter 通过以下方式让天文分析对所有人开放：
+1. **多主题配色** — 让不同色觉的用户都能看清
+2. **可调字体** — 适配不同视力水平
+3. **语音朗读** — 让视障用户用听觉接收结果
+4. **色盲模拟** — 让教育者理解色盲学生的体验
+5. **键盘导航** — 适配屏幕阅读器
+
+这些功能不仅是"加法"，而是**让 AstraFilter 成为真正包容的天文工具**。
     """)
 
 
