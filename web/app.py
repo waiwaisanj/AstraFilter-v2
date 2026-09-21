@@ -1672,7 +1672,7 @@ with st.sidebar:
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 
-tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([t("tab_home"), t("tab_detect"), "🔭 追踪", t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn")])
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([t("tab_home"), t("tab_detect"), "🔭 追踪", t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn"), "🤖 助手"])
 
 with tab0:
     # 顶部语言切换
