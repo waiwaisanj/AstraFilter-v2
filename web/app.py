@@ -29,7 +29,7 @@ except ImportError:
     Vizier = None
 
 
-st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
+st.set_page_config(page_title="AstraFilter", page_icon="web/astrafilter_favicon.png", layout="wide")
 
 # ===== 移动端响应式 CSS =====
 st.markdown("""
@@ -1486,6 +1486,12 @@ def detect_bright_stars(image, n_sigma=10, min_pixels=2, max_pixels=500, max_sta
 
 
 # ===== 页面 =====
+# Logo 显示
+try:
+    st.image("web/astrafilter_logo.png", width=120)
+except Exception:
+    pass
+
 # NASA 风格顶部横幅
 st.markdown("""
 <div class="nasa-banner">
