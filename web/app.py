@@ -647,6 +647,261 @@ def make_audio_script(candidates, data_shape, lang="zh"):
     return " ".join(parts)
 
 
+
+
+# ============ 发现报告生成 ============
+import base64
+from io import BytesIO as _BytesIO
+from datetime import datetime as _dt
+
+
+def fig_to_base64(fig):
+    """把 matplotlib 图像转成 base64"""
+    buf = _BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="white")
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+    plt.close(fig)
+    return img_base64
+
+
+def generate_discovery_report(image_data, candidates, header, wcs, validation_results=None, tracking_info=None, lang="zh"):
+    """生成发现报告的 HTML"""
+
+    report_id = "ASTRA-" + _dt.now().strftime("%Y%m%d-%H%M%S")
+
+    # ===== 生成图像 =====
+    # 原始图像
+    fig1, ax1 = plt.subplots(figsize=(8, 8), facecolor="white")
+    med = np.nanmedian(image_data)
+    std = np.nanstd(image_data)
+    ax1.imshow(image_data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+    ax1.set_title("Original Image", fontsize=14, fontweight="bold")
+    ax1.axis("off")
+    img1_b64 = fig_to_base64(fig1)
+
+    # 标注图像
+    fig2, ax2 = plt.subplots(figsize=(8, 8), facecolor="white")
+    ax2.imshow(image_data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+    for c in candidates:
+        rect = Rectangle((c["x"]-c["length"]/2, c["y"]-c["length"]/2),
+                         c["length"], c["length"],
+                         linewidth=2, edgecolor="red", facecolor="none")
+        ax2.add_patch(rect)
+    ax2.set_title("Detected Candidates", fontsize=14, fontweight="bold")
+    ax2.axis("off")
+    img2_b64 = fig_to_base64(fig2)
+
+    # ===== 构建候选体表格 =====
+    cand_rows = ""
+    for i, c in enumerate(candidates):
+        ra_str = "N/A"
+        dec_str = "N/A"
+        if wcs is not None:
+            try:
+                ra, dec = wcs.all_pix2world(c["x"], c["y"], 0)
+                ra_str = f"{float(ra):.6f}°"
+                dec_str = f"{float(dec):.6f}°"
+            except Exception:
+                pass
+        cand_rows += f"""
+        <tr>
+            <td>{i+1}</td>
+            <td>{c["x"]}</td>
+            <td>{c["y"]}</td>
+            <td>{ra_str}</td>
+            <td>{dec_str}</td>
+            <td>{c["length"]}</td>
+            <td>{c["linearity"]:.2f}</td>
+        </tr>
+        """
+
+    # ===== FITS 元数据 =====
+    meta_rows = ""
+    if header is not None:
+        for k in ["TELESCOP", "INSTRUME", "FILTER", "EXPTIME", "DATE-OBS", "AIRMASS", "SEEING"]:
+            if k in header:
+                meta_rows += f"<tr><td><b>{k}</b></td><td>{header[k]}</td></tr>"
+
+    # ===== 验证结果 =====
+    validation_html = ""
+    if validation_results:
+        for src, res in validation_results.items():
+            status_text = {"clear": "无已知天体 ✅", "found": "发现已知天体 ⚠️", "error": "查询失败 ❌"}.get(res.get("status", ""), "未知")
+            validation_html += f"<tr><td>{src}</td><td>{status_text}</td></tr>"
+
+    # ===== 追踪信息 =====
+    tracking_html = ""
+    if tracking_info:
+        tracking_html = f"""
+        <h2>Cross-night Tracking</h2>
+        <p><b>Number of nights:</b> {tracking_info.get("n_nights", "N/A")}</p>
+        <p><b>Estimated velocity:</b> {tracking_info.get("velocity", "N/A")} deg/day</p>
+        <p><b>Inferred type:</b> {tracking_info.get("type", "N/A")}</p>
+        """
+
+    # ===== MPC 格式 =====
+    mpc_lines = ""
+    if wcs is not None and len(candidates) > 0:
+        for c in candidates:
+            try:
+                ra, dec = wcs.all_pix2world(c["x"], c["y"], 0)
+                ra_h = float(ra) / 15.0
+                ra_hh = int(ra_h)
+                ra_mm = int((ra_h - ra_hh) * 60)
+                ra_ss = ((ra_h - ra_hh) * 60 - ra_mm) * 60
+                dec_sign = "+" if float(dec) >= 0 else "-"
+                dec_abs = abs(float(dec))
+                dec_dd = int(dec_abs)
+                dec_mm = int((dec_abs - dec_dd) * 60)
+                dec_ss = ((dec_abs - dec_dd) * 60 - dec_mm) * 60
+                mpc_lines += f"     K23A 00 00.00000  {ra_hh:02d} {ra_mm:02d} {ra_ss:05.2f} {dec_sign}{dec_dd:02d} {dec_mm:02d} {dec_ss:04.1f}                          I41<br>"
+            except Exception:
+                pass
+
+    # ===== 组装 HTML =====
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>AstraFilter Discovery Report - {report_id}</title>
+        <style>
+            body {{
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 40px;
+                color: #333;
+                line-height: 1.6;
+            }}
+            h1 {{
+                color: #0b3d91;
+                border-bottom: 4px solid #fc3d21;
+                padding-bottom: 15px;
+                margin-bottom: 30px;
+            }}
+            h2 {{
+                color: #0b3d91;
+                margin-top: 40px;
+                border-left: 5px solid #fc3d21;
+                padding-left: 15px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0;
+            }}
+            th {{
+                background: #0b3d91;
+                color: white;
+                padding: 10px;
+                text-align: left;
+            }}
+            td {{
+                padding: 8px 10px;
+                border-bottom: 1px solid #dde3ec;
+            }}
+            tr:hover {{
+                background: #f7f9fc;
+            }}
+            .report-id {{
+                color: #666;
+                font-family: monospace;
+                font-size: 14px;
+            }}
+            .disclaimer {{
+                background: #fff3cd;
+                border-left: 4px solid #ffc107;
+                padding: 15px 20px;
+                margin: 30px 0;
+                border-radius: 4px;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+                border: 1px solid #ddd;
+                margin: 15px 0;
+            }}
+            .mpc-block {{
+                background: #1a1a1a;
+                color: #00ff00;
+                padding: 20px;
+                font-family: monospace;
+                font-size: 12px;
+                overflow-x: auto;
+                border-radius: 4px;
+            }}
+            .footer {{
+                margin-top: 50px;
+                padding-top: 20px;
+                border-top: 1px solid #dde3ec;
+                color: #666;
+                font-size: 14px;
+                text-align: center;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>🔭 AstraFilter Discovery Report</h1>
+        <p class="report-id">Report ID: <b>{report_id}</b> | Generated: {_dt.now().strftime("%Y-%m-%d %H:%M:%S")} UTC</p>
+
+        <h2>1. Image Information</h2>
+        <table>
+            <tr><td><b>Image size</b></td><td>{image_data.shape[0]} × {image_data.shape[1]} pixels</td></tr>
+            <tr><td><b>Detection threshold</b></td><td>5.0 sigma above background</td></tr>
+            <tr><td><b>Minimum length</b></td><td>15 pixels</td></tr>
+            <tr><td><b>Minimum linearity</b></td><td>3.0</td></tr>
+            {meta_rows}
+        </table>
+
+        <h2>2. Detected Candidates</h2>
+        <p>Total: <b>{len(candidates)}</b> candidate(s)</p>
+        <table>
+            <tr>
+                <th>#</th><th>X (pixel)</th><th>Y (pixel)</th><th>RA</th><th>Dec</th>
+                <th>Length</th><th>Linearity</th>
+            </tr>
+            {cand_rows}
+        </table>
+
+        <h2>3. Visualization</h2>
+        <img src="data:image/png;base64,{img1_b64}" alt="Original">
+        <img src="data:image/png;base64,{img2_b64}" alt="Detected">
+
+        <h2>4. Multi-Source Validation</h2>
+        <table>
+            <tr><th>Source</th><th>Result</th></tr>
+            {validation_html}
+        </table>
+
+        {tracking_html}
+
+        <h2>5. MPC Submission Format</h2>
+        <p>If this candidate is confirmed across multiple nights, the following 80-column format can be submitted to the Minor Planet Center:</p>
+        <div class="mpc-block">
+            {mpc_lines if mpc_lines else "No WCS information available. Cannot generate MPC format."}
+        </div>
+
+        <div class="disclaimer">
+            <b>⚠️ Disclaimer</b><br>
+            This report is generated automatically by AstraFilter based on single-frame detection.
+            A single frame cannot confirm whether the candidate is a real astronomical object.
+            Multi-night observations and orbit fitting are required for confirmation.
+            This report should be treated as a <b>candidate list</b>, not as a definitive discovery claim.
+        </div>
+
+        <div class="footer">
+            Generated by <b>AstraFilter</b> | https://astrafilter-v3.streamlit.app<br>
+            Data source: NASA/IPAC IRSA (ZTF), Vizier, MPChecker
+        </div>
+    </body>
+    </html>
+    """
+
+    return html, report_id
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -1113,6 +1368,30 @@ with tab1:
                     ax.axis("off")
                     with cols_ui[i % 3]:
                         st.pyplot(fig)
+
+                # ===== 发现报告生成按钮 =====
+                st.markdown("---")
+                st.subheader("📄 生成发现报告")
+                st.markdown("把本次检测的所有结果汇总成一份完整的 HTML 报告，包含图像、候选体列表、验证结果、MPC 提交格式。")
+
+                if st.button("一键生成报告", type="primary"):
+                    with st.spinner("生成中..."):
+                        validation = st.session_state.get("validation_results", None)
+                        tracking = st.session_state.get("tracking_info", None)
+                        html_report, report_id = generate_discovery_report(
+                            data, candidates, header, wcs,
+                            validation_results=validation,
+                            tracking_info=tracking,
+                        )
+                    st.success("报告生成完成！报告 ID: " + report_id)
+                    st.download_button(
+                        "📥 下载 HTML 报告",
+                        html_report,
+                        file_name="AstraFilter_Report_" + report_id + ".html",
+                        mime="text/html",
+                    )
+                    st.markdown("**报告预览**")
+                    st.components.v1.html(html_report, height=600, scrolling=True)
 
 
 with tab2:
