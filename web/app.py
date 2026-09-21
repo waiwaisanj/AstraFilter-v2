@@ -1,3 +1,40 @@
+"""
+AstraFilter - 稳定版本
+包含依赖检查、错误隔离、安全配置
+"""
+
+# ===== 依赖检查（启动时运行）=====
+import sys as _sys
+
+_MISSING_DEPS = []
+_REQUIRED_DEPS = [
+    ("streamlit", "streamlit"),
+    ("numpy", "numpy"),
+    ("pandas", "pandas"),
+    ("PIL", "Pillow"),
+    ("matplotlib", "matplotlib"),
+    ("scipy", "scipy"),
+    ("requests", "requests"),
+    ("astropy", "astropy"),
+]
+
+for _mod, _pkg in _REQUIRED_DEPS:
+    try:
+        __import__(_mod)
+    except ImportError:
+        _MISSING_DEPS.append(_pkg)
+
+if _MISSING_DEPS:
+    print("=" * 60)
+    print("⚠️ 缺少依赖:")
+    for _p in _MISSING_DEPS:
+        print(f"   - {_p}")
+    print("=" * 60)
+    print("请在 requirements.txt 中补充这些库，然后重新部署。")
+
+# ===== 版本号 =====
+ASTRAFILTER_VERSION = "1.0.0"
+ASTRAFILTER_BUILD_DATE = "2026-09"
 
 import streamlit as st
 import numpy as np
@@ -30,6 +67,16 @@ except ImportError:
 
 
 st.set_page_config(page_title="AstraFilter", page_icon="🔭", layout="wide")
+
+# ===== 安全增强 =====
+st.markdown("""
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+<meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+<meta name="description" content="AstraFilter - Free online astronomical image analysis platform">
+<meta name="robots" content="index, follow">
+""", unsafe_allow_html=True)
+
 
 # ===== 移动端响应式 CSS =====
 st.markdown("""
@@ -1509,6 +1556,36 @@ def make_validation_charts(results):
 
     plt.tight_layout()
     return fig
+
+
+
+# ===== 错误隔离：每个标签页独立运行 =====
+def safe_render(fn, tab_name="Tab"):
+    """安全渲染一个标签页，捕获所有异常"""
+    try:
+        fn()
+    except Exception as e:
+        st.error(f"⚠️ {tab_name} 模块出现错误，但不影响其他功能。")
+        with st.expander("查看详细错误信息"):
+            st.code(str(e))
+            import traceback
+            st.code(traceback.format_exc())
+        st.info("你可以继续使用其他标签页。如果问题持续，请联系开发者。")
+
+
+def safe_render_tab(tab_name):
+    """装饰器版本"""
+    def decorator(fn):
+        def wrapper():
+            try:
+                fn()
+            except Exception as e:
+                st.error(f"⚠️ {tab_name} 模块出现错误。")
+                with st.expander("错误详情"):
+                    st.code(str(e))
+        return wrapper
+    return decorator
+
 
 
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
