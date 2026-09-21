@@ -902,6 +902,78 @@ def generate_discovery_report(image_data, candidates, header, wcs, validation_re
     return html, report_id
 
 
+
+
+# ============ 互动 FMO 模拟器 ============
+def generate_fmo_simulation(
+    brightness=30,
+    velocity_deg_per_day=3.0,
+    exposure_sec=30,
+    noise_sigma=5.0,
+    psf_sigma=1.5,
+    image_size=256,
+    pixel_scale_arcsec=1.0,
+):
+    """生成 FMO 在图像上的模拟条纹
+
+    参数:
+        brightness: 条纹亮度（相对背景）
+        velocity_deg_per_day: 天球运动速率
+        exposure_sec: 曝光时间（秒）
+        noise_sigma: 背景噪声标准差
+        psf_sigma: PSF 高斯模糊 sigma
+        image_size: 图像尺寸
+        pixel_scale_arcsec: 像素尺度（角秒/像素）
+    """
+    from scipy.ndimage import gaussian_filter
+
+    # 生成背景噪声
+    image = np.random.normal(0, noise_sigma, (image_size, image_size))
+
+    # 计算条纹长度（像素）
+    # 每秒移动度数 = velocity_deg_per_day / 86400
+    # 曝光时间内移动度数 = velocity * exposure / 86400
+    # 换成角秒 = 度数 * 3600
+    # 换成像素 = 角秒 / pixel_scale
+    streak_length_deg = velocity_deg_per_day * exposure_sec / 86400.0
+    streak_length_arcsec = streak_length_deg * 3600.0
+    streak_length_pix = streak_length_arcsec / pixel_scale_arcsec
+
+    # 如果条纹长度小于 1 像素，就是个点
+    if streak_length_pix < 1:
+        streak_length_pix = 1
+
+    # 生成条纹
+    streak = np.zeros((image_size, image_size))
+    cx, cy = image_size // 2, image_size // 2
+    angle = np.random.uniform(0, 2 * np.pi)
+    n_steps = max(5, int(streak_length_pix * 3))
+
+    for step in np.linspace(-streak_length_pix / 2, streak_length_pix / 2, n_steps):
+        x = int(round(cx + step * np.cos(angle)))
+        y = int(round(cy + step * np.sin(angle)))
+        if 0 <= x < image_size and 0 <= y < image_size:
+            streak[y, x] = brightness
+
+    # PSF 模糊
+    streak = gaussian_filter(streak, sigma=psf_sigma)
+
+    # 合成图像
+    simulated = image + streak
+
+    return simulated, streak, streak_length_pix
+
+
+def run_simulation_detection(simulated_image, n_sigma=5, min_length=10, min_linearity=3.0):
+    """对模拟图像运行检测器"""
+    return detect_traditional(
+        simulated_image,
+        n_sigma=n_sigma,
+        min_length=min_length,
+        min_linearity=min_linearity,
+    )
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -1828,16 +1900,152 @@ with tab7:
 
 
 with tab8:
-    st.header("什么是快速移动天体 (FMO)？")
+    st.header("📚 学习与模拟")
+    st.markdown("这一页既有教学讲解，也有互动模拟器。你可以调节参数，亲眼看到快速移动天体（FMO）是如何在图像上留下条纹的。")
+
+    # ===== 互动模拟器 =====
+    st.markdown("---")
+    st.subheader("🔬 互动 FMO 模拟器")
+    st.markdown("调节下方参数，系统会实时生成一颗小行星在 ZTF 图像上留下的条纹，并演示检测器如何识别它。")
+
+    col_slider1, col_slider2 = st.columns(2)
+
+    with col_slider1:
+        brightness = st.slider(
+            "条纹亮度（相对背景）",
+            5, 100, 30, 5,
+            help="小行星有多亮。数值越大，条纹越明显。",
+        )
+        velocity = st.slider(
+            "运动速率（度/天）",
+            0.01, 20.0, 3.0, 0.1,
+            help="FMO 在天球上的运动速度。主带小行星约 0.1-0.5 度/天，近地小行星可达 1-20 度/天。",
+        )
+        exposure = st.slider(
+            "曝光时间（秒）",
+            5, 120, 30, 5,
+            help="ZTF 通常用 30 秒曝光。曝光越长，条纹越明显。",
+        )
+
+    with col_slider2:
+        noise = st.slider(
+            "背景噪声（sigma）",
+            1.0, 15.0, 5.0, 0.5,
+            help="图像的噪声水平。噪声越大，暗弱条纹越难检测。",
+        )
+        psf = st.slider(
+            "PSF 模糊（sigma）",
+            0.5, 4.0, 1.5, 0.1,
+            help="大气抖动造成的模糊。数值越大，条纹越模糊。",
+        )
+        pixel_scale = st.slider(
+            "像素尺度（角秒/像素）",
+            0.5, 3.0, 1.0, 0.1,
+            help="ZTF 约 1 角秒/像素。数值越小，条纹越长。",
+        )
+
+    # 生成模拟
+    simulated, streak, streak_length = generate_fmo_simulation(
+        brightness=brightness,
+        velocity_deg_per_day=velocity,
+        exposure_sec=exposure,
+        noise_sigma=noise,
+        psf_sigma=psf,
+        pixel_scale_arcsec=pixel_scale,
+    )
+
+    # 显示结果
+    col_img1, col_img2 = st.columns(2)
+
+    with col_img1:
+        st.markdown("**模拟图像**")
+        fig, ax = plt.subplots(figsize=(6, 6), facecolor="white")
+        med = np.median(simulated)
+        std = np.std(simulated)
+        ax.imshow(simulated, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+        ax.set_title("Simulated ZTF Image", fontsize=12)
+        ax.axis("off")
+        st.pyplot(fig)
+
+    # 运行检测
+    detected = run_simulation_detection(simulated)
+
+    with col_img2:
+        st.markdown("**检测结果**")
+        fig, ax = plt.subplots(figsize=(6, 6), facecolor="white")
+        med = np.median(simulated)
+        std = np.std(simulated)
+        ax.imshow(simulated, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+        for c in detected:
+            rect = Rectangle(
+                (c["x"] - c["length"]/2, c["y"] - c["length"]/2),
+                c["length"], c["length"],
+                linewidth=2, edgecolor="red", facecolor="none",
+            )
+            ax.add_patch(rect)
+        ax.set_title("Detected: " + str(len(detected)) + " candidates", fontsize=12)
+        ax.axis("off")
+        st.pyplot(fig)
+
+    # 科学解读
+    st.markdown("---")
+    st.subheader("📊 模拟参数解读")
+
+    col_info1, col_info2, col_info3 = st.columns(3)
+    col_info1.metric("条纹长度", f"{streak_length:.1f} 像素")
+    col_info2.metric("检测到的候选体", len(detected))
+    col_info3.metric("理论长度", f"{velocity * exposure / 86400 * 3600 / pixel_scale:.1f} 像素")
+
+    # 根据参数给出解释
+    if streak_length < 3:
+        st.warning(
+            "⚠️ 条纹长度只有 " + str(round(streak_length, 1)) + " 像素。"
+            "当运动速率很低或曝光时间很短时，FMO 看起来就像一个点源，无法与恒星区分。"
+        )
+    elif len(detected) == 0:
+        st.warning(
+            "⚠️ 虽然没有检测到候选体，但条纹确实存在。"
+            "可能是亮度太低（被噪声淹没）或线性度不够（PSF 模糊太严重）。"
+            "试着增加亮度或减少噪声。"
+        )
+    else:
+        st.success(
+            "✅ 检测到 " + str(len(detected)) + " 个候选体！"
+            "条纹长度 " + str(round(streak_length, 1)) + " 像素，"
+            "检测器成功识别了它。"
+        )
+
+    st.markdown("---")
+    st.markdown("**这个模拟器告诉我们什么？**")
     st.markdown("""
-快速移动天体（FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
+1. **运动速率决定条纹长度** — 速率越高，条纹越长
+2. **曝光时间影响可见性** — 曝光越长，条纹越明显
+3. **亮度与噪声的竞争** — 如果亮度不够，条纹会被噪声淹没
+4. **PSF 模糊的影响** — 大气抖动会拉长条纹，但也会降低对比度
+5. **这就是为什么 FMO 检测这么难** — 只有同时满足"够亮、够快、够近"的天体才能被检测到
+    """)
 
-包括：
-- 近地小行星（NEA）— 行星防御的重点监测对象
-- 主带小行星 — 运动速率通常小于 0.5 度/天
-- 人造卫星和空间碎片
+    st.markdown("---")
+    st.markdown("**想了解更多？**")
+    st.markdown("""
+- 想实际检测真实图像？去「🔍 检测」标签上传图像
+- 想查询天区里的已知恒星？去「🌌 星图」标签
+- 想追踪候选体的跨夜移动？去「🔭 追踪」标签
+    """)
 
-在 ZTF 巡天望远镜的 30 秒曝光中，FMO 会留下一条细长的条纹，而恒星和星系呈现为点源。
+    # ===== 原有的科普内容 =====
+    st.markdown("---")
+    st.header("快速移动天体（FMO）基础知识")
+    st.markdown("""
+快速移动天体（Fast-Moving Object, FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
+
+**主要类型：**
+- **近地小行星（NEA）** — 轨道与地球轨道相交或接近，是行星防御的重点监测对象
+- **主带小行星** — 运动速率通常小于 0.5 度/天，不形成明显条纹
+- **人造卫星和空间碎片** — 轨道周期短，运动速率高，但通常更亮
+
+**为什么用条纹来识别 FMO？**
+ZTF 的 30 秒曝光中，静止的恒星和星系呈现为点源，而 FMO 会留下一条细长的条纹。这让条纹成为 FMO 的独特标志。
     """)
 
     st.markdown("---")
@@ -1850,6 +2058,9 @@ with tab8:
 **第三步：PCA 分析** — 计算每个目标的主方向长度和线性度。
 
 **第四步：筛选** — 保留长度 > 15 像素、线性度 > 3.0 的目标。
+
+**为什么用 PCA 而不是简单的长宽比？**
+因为条纹可以是任何方向。对角线方向的条纹在 bounding box 里长宽比接近 1，但在 PCA 空间里会显示出极高的线性度。
     """)
 
     st.markdown("---")
@@ -1861,3 +2072,5 @@ with tab8:
 - JPL Horizons：https://ssd.jpl.nasa.gov/horizons/
 - DeepStreaks：https://github.com/dmitryduev/DeepStreaks
     """)
+
+
