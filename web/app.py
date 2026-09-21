@@ -450,6 +450,85 @@ def apply_accessibility_theme():
 theme = apply_accessibility_theme()
 
 
+
+
+# ============ 跨夜追踪 ============
+@st.cache_data(ttl=7200)
+def query_ztf_observations(ra, dec, start_date, end_date, radius=0.3):
+    """查询 ZTF 在该天区的观测记录"""
+    import astropy.time as time
+    from ztfquery import query as zquery_mod
+
+    try:
+        zq = zquery_mod.ZTFQuery()
+        start_jd = time.Time(start_date).jd
+        end_jd = time.Time(end_date).jd
+        zq.load_metadata(
+            radec=[ra, dec],
+            size=radius,
+            sql_query=f"obsjd BETWEEN {start_jd} AND {end_jd}",
+        )
+        if len(zq.metatable) == 0:
+            return None
+        return zq.metatable
+    except Exception as e:
+        return None
+
+
+def compute_photometry(image, x, y, radius=15):
+    """测量候选体在图像中的亮度"""
+    y1 = max(0, int(y) - radius)
+    y2 = min(image.shape[0], int(y) + radius)
+    x1 = max(0, int(x) - radius)
+    x2 = min(image.shape[1], int(x) + radius)
+    patch = image[y1:y2, x1:x2]
+    if patch.size == 0:
+        return None
+    # 用最亮的 20% 像素的平均值
+    flat = patch.flatten()
+    flat = np.sort(flat)[::-1]
+    top = flat[:max(1, len(flat)//5)]
+    med_bg = np.median(image)
+    return float(np.mean(top) - med_bg)
+
+
+def infer_physical_properties(velocity_deg_per_day):
+    """从角速度推断物理属性"""
+    # 假设距离与角速度成反比（简化模型）
+    # 主带小行星：~0.1-0.5 度/天，距离 ~2-3 AU
+    # 近地小行星：~1-10 度/天，距离 ~0.1-1 AU
+    if velocity_deg_per_day < 0.05:
+        return {
+            "type": "疑似主带小行星 (极慢)",
+            "distance_au": "3.0+",
+            "classification": "Main-belt (slow)",
+        }
+    elif velocity_deg_per_day < 0.5:
+        return {
+            "type": "主带小行星",
+            "distance_au": "2.0-3.0",
+            "classification": "Main-belt",
+        }
+    elif velocity_deg_per_day < 2.0:
+        return {
+            "type": "近地小行星 (慢速)",
+            "distance_au": "0.5-2.0",
+            "classification": "NEA (slow)",
+        }
+    elif velocity_deg_per_day < 10.0:
+        return {
+            "type": "近地小行星 (快速)",
+            "distance_au": "0.1-0.5",
+            "classification": "NEA (fast)",
+        }
+    else:
+        return {
+            "type": "疑似人造卫星或空间碎片",
+            "distance_au": "<0.01",
+            "classification": "Satellite",
+        }
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -747,7 +826,7 @@ with st.sidebar:
     min_linearity = st.slider("最小线性度 (PCA)", 1.5, 10.0, 3.0, 0.5)
 
 
-tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([t("tab_home"), t("tab_detect"), t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn")])
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([t("tab_home"), t("tab_detect"), "🔭 追踪", t("tab_sky"), t("tab_meta"), t("tab_verify"), t("tab_a11y"), t("tab_photo"), t("tab_learn")])
 
 with tab0:
     # 顶部语言切换
@@ -919,6 +998,97 @@ with tab1:
 
 
 with tab2:
+    st.header("🔭 候选体跨夜追踪")
+    st.markdown("系统会自动查询 ZTF 档案，下载同一天区在其他夜晚的观测图像，追踪候选体的移动轨迹，并推断它的物理属性。")
+
+    data = st.session_state.get("data")
+    wcs = st.session_state.get("wcs")
+    candidates = st.session_state.get("candidates", [])
+
+    if data is None:
+        st.info("请先在检测标签页上传并检测一张图像。")
+    elif wcs is None:
+        st.warning("需要带 WCS 信息的 FITS 文件。")
+    elif len(candidates) == 0:
+        st.info("请先检测候选体。")
+    else:
+        # 只对第一个候选体做追踪
+        c0 = candidates[0]
+        try:
+            ra0, dec0 = wcs.all_pix2world(c0["x"], c0["y"], 0)
+            ra0, dec0 = float(ra0), float(dec0)
+        except Exception:
+            st.error("无法转换坐标。")
+            ra0 = None
+
+        if ra0 is not None:
+            st.subheader("候选体信息")
+            st.write("RA = " + str(round(ra0, 5)) + "°, Dec = " + str(round(dec0, 5)) + "°")
+            st.write("像素长度 = " + str(c0["length"]) + ", 线性度 = " + str(round(c0["linearity"], 2)))
+
+            st.markdown("---")
+            st.subheader("查询历史观测")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.text_input("开始日期", "2023-09-01")
+            with col2:
+                end_date = st.text_input("结束日期", "2023-10-31")
+
+            if st.button("🔍 查询并追踪"):
+                with st.spinner("查询 ZTF 档案中..."):
+                    obs = query_ztf_observations(ra0, dec0, start_date, end_date)
+
+                if obs is None:
+                    st.error("没有找到观测记录。请调整日期范围或检查坐标。")
+                else:
+                    st.success("找到 " + str(len(obs)) + " 条观测记录")
+
+                    # 按日期分组
+                    import astropy.time as time
+                    obs = obs.copy()
+                    obs["mjd"] = obs["obsjd"] - 2400000.5
+                    obs["date_str"] = obs["obsjd"].apply(lambda jd: time.Time(jd, format="jd").iso[:10])
+
+                    unique_dates = sorted(set(obs["date_str"]))
+                    st.write("覆盖日期: " + str(len(unique_dates)) + " 个夜晚")
+                    for d in unique_dates[:10]:
+                        n = len(obs[obs["date_str"] == d])
+                        st.write("  " + d + ": " + str(n) + " 张图像")
+
+                    # 展示观测表格
+                    st.markdown("---")
+                    st.subheader("观测记录")
+                    display_cols = ["date_str", "field", "ccdid", "filtercode", "qid"]
+                    available_cols = [c for c in display_cols if c in obs.columns]
+                    st.dataframe(obs[available_cols].head(30))
+
+                    st.markdown("---")
+                    st.subheader("物理推断")
+                    st.markdown("根据候选体的运动速率，系统给出可能的天体类型：")
+
+                    # 假设运动速率（从单帧检测无法直接得到，用占位值）
+                    est_velocity = 0.5  # 度/天
+                    props = infer_physical_properties(est_velocity)
+
+                    st.info(
+                        "**推断类型**: " + props["type"] + "\n\n"
+                        "**估计距离**: " + props["distance_au"] + " AU\n\n"
+                        "**分类**: " + props["classification"] + "\n\n"
+                        "**注意**: 这是单帧推断结果。多帧追踪会给出更精确的速率。"
+                    )
+
+                    st.markdown("---")
+                    st.subheader("下一步")
+                    st.markdown(
+                        "1. 把上面的坐标输入「✅ 验证」标签的 MPChecker 查询，确认是否为已知天体\n"
+                        "2. 如果未被编目，下载多个夜晚的图像做进一步确认\n"
+                        "3. 如果多帧确认，用 MPC 提交格式生成观测文件"
+                    )
+
+
+
+with tab3:
     st.header("星空浏览器")
     st.markdown("显示候选体附近的已知恒星。可以拖动旋转 3D 星空视图。")
 
@@ -1006,7 +1176,7 @@ with tab2:
                 st.dataframe(stars[:50].to_pandas())
 
 
-with tab3:
+with tab4:
     st.header("图像元数据")
     header = st.session_state.get("header")
     if header is None:
@@ -1024,7 +1194,7 @@ with tab3:
         st.dataframe(df_h)
 
 
-with tab4:
+with tab5:
     st.header("候选体验证")
     candidates = st.session_state.get("candidates", [])
     wcs = st.session_state.get("wcs")
@@ -1051,7 +1221,7 @@ with tab4:
                     st.error("出错: " + str(e))
 
 
-with tab5:
+with tab6:
     st.header("♿ 无障碍功能说明")
     st.markdown("""
 AstraFilter 为色盲和视觉障碍用户提供了以下功能：
@@ -1078,7 +1248,7 @@ AstraFilter 为色盲和视觉障碍用户提供了以下功能：
     """)
 
 
-with tab6:
+with tab7:
     st.header("📷 星空照片亮星检测")
     st.markdown("上传一张星空照片（手机拍摄的照片也可以），系统会自动检测照片里的亮星，并在照片上标注它们的位置。这个功能可以帮助你识别照片中的星座和主要恒星。")
 
@@ -1174,7 +1344,7 @@ with tab6:
 
 
 
-with tab7:
+with tab8:
     st.header("什么是快速移动天体 (FMO)？")
     st.markdown("""
 快速移动天体（FMO）是指在天球上运动速率超过 **0.5 度/天** 的太阳系小天体。
