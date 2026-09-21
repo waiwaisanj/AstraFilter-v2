@@ -315,10 +315,36 @@ def apply_accessibility_theme():
         color: {theme["fg"]};
         font-size: {font_size};
     }}
-    .stMarkdown, .stText, p, div, span, label {{
-        color: {theme["fg"]} !important;
-        font-size: {font_size};
-    }}
+        .stMarkdown p, .stText p, p {
+        color: #1f2328 !important;
+    }
+    .nasa-banner h1, .nasa-banner p, .nasa-banner span {
+        color: #ffffff !important;
+    }
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] label {
+        color: #1f2328 !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #0b3d91 !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #4a5568 !important;
+    }
+    .stSelectbox label, .stTextInput label, .stSlider label,
+    .stNumberInput label, .stFileUploader label, .stCheckbox label {
+        color: #1f2328 !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        color: #4a5568 !important;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #0b3d91 !important;
+    }
+    .stButton > button, .stDownloadButton > button {
+        color: #ffffff !important;
+    }
     h1, h2, h3, h4 {{
         color: {theme["accent"]} !important;
         font-family: 'Helvetica Neue', Arial, sans-serif;
