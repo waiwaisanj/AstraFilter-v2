@@ -974,6 +974,264 @@ def run_simulation_detection(simulated_image, n_sigma=5, min_length=10, min_line
     )
 
 
+
+
+# ============ 发现证书 ============
+def generate_discovery_certificate(candidate, image_data, wcs, detection_date=None, observer="Anonymous"):
+    """为单个候选体生成发现证书 HTML"""
+    import base64
+    from io import BytesIO as _BytesIO
+    from datetime import datetime as _dt
+
+    # 计算候选体的 RA/Dec
+    ra_str = "N/A"
+    dec_str = "N/A"
+    ra_hms = "N/A"
+    dec_dms = "N/A"
+    if wcs is not None:
+        try:
+            ra, dec = wcs.all_pix2world(candidate["x"], candidate["y"], 0)
+            ra = float(ra)
+            dec = float(dec)
+            ra_str = f"{ra:.6f}"
+            dec_str = f"{dec:.6f}"
+
+            # 转时分秒
+            ra_h = ra / 15.0
+            ra_hh = int(ra_h)
+            ra_mm = int((ra_h - ra_hh) * 60)
+            ra_ss = ((ra_h - ra_hh) * 60 - ra_mm) * 60
+            ra_hms = f"{ra_hh:02d}h {ra_mm:02d}m {ra_ss:05.2f}s"
+
+            dec_sign = "+" if dec >= 0 else "-"
+            dec_abs = abs(dec)
+            dec_dd = int(dec_abs)
+            dec_mm = int((dec_abs - dec_dd) * 60)
+            dec_ss = ((dec_abs - dec_dd) * 60 - dec_mm) * 60
+            dec_dms = f"{dec_sign}{dec_dd:02d}\u00b0 {dec_mm:02d}' {dec_ss:04.1f}\u2033"
+        except Exception:
+            pass
+
+    # 生成候选体局部图像
+    box = max(60, candidate["length"])
+    x1 = max(0, int(candidate["x"]) - box)
+    x2 = min(image_data.shape[1], int(candidate["x"]) + box)
+    y1 = max(0, int(candidate["y"]) - box)
+    y2 = min(image_data.shape[0], int(candidate["y"]) + box)
+    patch = image_data[y1:y2, x1:x2]
+
+    fig, ax = plt.subplots(figsize=(5, 5), facecolor="white")
+    med = np.median(patch)
+    std = np.std(patch)
+    ax.imshow(patch, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+    ax.set_title("Candidate Cutout", fontsize=14, fontweight="bold")
+    ax.axis("off")
+
+    buf = _BytesIO()
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="white")
+    buf.seek(0)
+    cutout_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    plt.close(fig)
+
+    # 生成完整图像（标注候选体）
+    fig2, ax2 = plt.subplots(figsize=(6, 6), facecolor="white")
+    med = np.nanmedian(image_data)
+    std = np.nanstd(image_data)
+    ax2.imshow(image_data, cmap="gray", vmin=med-2*std, vmax=med+5*std)
+    rect = Rectangle(
+        (candidate["x"] - candidate["length"]/2, candidate["y"] - candidate["length"]/2),
+        candidate["length"], candidate["length"],
+        linewidth=3, edgecolor="red", facecolor="none",
+    )
+    ax2.add_patch(rect)
+    ax2.axis("off")
+    buf2 = _BytesIO()
+    fig2.savefig(buf2, format="png", dpi=120, bbox_inches="tight", facecolor="white")
+    buf2.seek(0)
+    full_b64 = base64.b64encode(buf2.read()).decode("utf-8")
+    plt.close(fig2)
+
+    # 证书编号
+    cert_id = "ASTRA-" + _dt.now().strftime("%Y%m%d") + "-" + str(int(candidate["x"])) + str(int(candidate["y"]))
+
+    # 检测日期
+    if detection_date is None:
+        detection_date = _dt.now().strftime("%Y-%m-%d")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Discovery Certificate - {cert_id}</title>
+        <style>
+            body {{
+                font-family: 'Georgia', 'Times New Roman', serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 40px;
+                background: #f7f9fc;
+            }}
+            .certificate {{
+                background: #ffffff;
+                border: 8px double #0b3d91;
+                border-radius: 8px;
+                padding: 50px;
+                box-shadow: 0 8px 30px rgba(11,61,145,0.15);
+                position: relative;
+            }}
+            .certificate::before {{
+                content: "";
+                position: absolute;
+                top: 20px; left: 20px; right: 20px; bottom: 20px;
+                border: 2px solid #fc3d21;
+                border-radius: 4px;
+                pointer-events: none;
+            }}
+            h1 {{
+                text-align: center;
+                color: #0b3d91;
+                font-size: 2.2rem;
+                letter-spacing: 2px;
+                margin-bottom: 10px;
+            }}
+            .subtitle {{
+                text-align: center;
+                color: #fc3d21;
+                font-size: 1rem;
+                font-weight: bold;
+                letter-spacing: 3px;
+                margin-bottom: 30px;
+            }}
+            .cert-id {{
+                text-align: center;
+                font-family: monospace;
+                color: #666;
+                font-size: 14px;
+                margin-bottom: 40px;
+            }}
+            .section {{
+                margin: 30px 0;
+                padding: 20px;
+                background: #f7f9fc;
+                border-left: 4px solid #0b3d91;
+                border-radius: 4px;
+            }}
+            .section-title {{
+                color: #0b3d91;
+                font-size: 1.1rem;
+                font-weight: bold;
+                margin-bottom: 15px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }}
+            .data-row {{
+                display: flex;
+                justify-content: space-between;
+                padding: 6px 0;
+                border-bottom: 1px dashed #dde3ec;
+            }}
+            .data-label {{
+                font-weight: bold;
+                color: #666;
+            }}
+            .data-value {{
+                font-family: monospace;
+                color: #333;
+            }}
+            img {{
+                display: block;
+                margin: 20px auto;
+                border: 2px solid #0b3d91;
+                border-radius: 4px;
+                max-width: 100%;
+            }}
+            .footer {{
+                text-align: center;
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 2px solid #0b3d91;
+                font-style: italic;
+                color: #666;
+                font-size: 14px;
+            }}
+            .signature {{
+                text-align: center;
+                margin-top: 30px;
+            }}
+            .signature-name {{
+                font-family: 'Brush Script MT', cursive;
+                font-size: 2rem;
+                color: #0b3d91;
+            }}
+            .seal {{
+                display: inline-block;
+                width: 100px;
+                height: 100px;
+                border: 3px solid #fc3d21;
+                border-radius: 50%;
+                text-align: center;
+                line-height: 1.3;
+                color: #fc3d21;
+                font-weight: bold;
+                padding: 20px 5px;
+                margin-top: 20px;
+                font-size: 0.8rem;
+                box-sizing: border-box;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="certificate">
+            <h1>DISCOVERY CERTIFICATE</h1>
+            <div class="subtitle">ASTRONOMICAL CANDIDATE DETECTION</div>
+            <div class="cert-id">Certificate ID: {cert_id}</div>
+
+            <p style="text-align: center; font-size: 1.1rem; line-height: 1.8;">
+                This certificate is awarded to<br>
+                <span class="signature-name">{observer}</span><br>
+                in recognition of the detection of a potential Fast-Moving Object candidate
+            </p>
+
+            <div class="section">
+                <div class="section-title">🔭 Candidate Coordinates</div>
+                <div class="data-row"><span class="data-label">Right Ascension (J2000)</span><span class="data-value">{ra_str}°</span></div>
+                <div class="data-row"><span class="data-label">Declination (J2000)</span><span class="data-value">{dec_str}°</span></div>
+                <div class="data-row"><span class="data-label">RA (HMS)</span><span class="data-value">{ra_hms}</span></div>
+                <div class="data-row"><span class="data-label">Dec (DMS)</span><span class="data-value">{dec_dms}</span></div>
+                <div class="data-row"><span class="data-label">Pixel Position</span><span class="data-value">({candidate["x"]}, {candidate["y"]})</span></div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📊 Detection Details</div>
+                <div class="data-row"><span class="data-label">Detection Date</span><span class="data-value">{detection_date}</span></div>
+                <div class="data-row"><span class="data-label">Streak Length</span><span class="data-value">{candidate["length"]} pixels</span></div>
+                <div class="data-row"><span class="data-label">Linearity (PCA)</span><span class="data-value">{candidate["linearity"]:.2f}</span></div>
+                <div class="data-row"><span class="data-label">Detection Method</span><span class="data-value">8-connected + PCA</span></div>
+                <div class="data-row"><span class="data-label">Data Source</span><span class="data-value">ZTF (IRSA)</span></div>
+            </div>
+
+            <div class="section-title" style="text-align: center; margin-top: 30px;">Candidate Cutout</div>
+            <img src="data:image/png;base64,{cutout_b64}" alt="Candidate Cutout" style="max-width: 300px;">
+
+            <div class="section-title" style="text-align: center;">Full Image with Marked Candidate</div>
+            <img src="data:image/png;base64,{full_b64}" alt="Full Image" style="max-width: 400px;">
+
+            <div class="signature">
+                <div class="seal">ASTRA<br>VERIFIED<br>PIPELINE</div>
+            </div>
+
+            <div class="footer">
+                Generated by <b>AstraFilter</b> — https://astrafilter-v3.streamlit.app<br>
+                Note: This certificate documents a <b>candidate detection</b>. Multi-night confirmation and MPC verification are required to establish this as a discovery.
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html, cert_id
+
+
 def detect_traditional(image, n_sigma=5, min_length=10, min_linearity=3.0):
     med = np.nanmedian(image)
     std = np.nanstd(image)
@@ -1440,6 +1698,36 @@ with tab1:
                     ax.axis("off")
                     with cols_ui[i % 3]:
                         st.pyplot(fig)
+
+                # ===== 发现证书生成 =====
+                st.markdown("---")
+                st.subheader("🏆 生成发现证书")
+                st.markdown("为选中的候选体生成一份精美的发现证书。可以下载、打印或分享。")
+
+                # 选择候选体
+                cand_options = ["候选体 " + str(i+1) + " (线性度 " + str(round(c["linearity"], 1)) + ")" for i, c in enumerate(candidates)]
+                selected_idx = st.selectbox("选择候选体", range(len(candidates)), format_func=lambda i: cand_options[i])
+
+                observer_name = st.text_input("你的名字（显示在证书上）", "Anonymous Observer")
+                detection_date = st.text_input("检测日期", "2024-01-01")
+
+                if st.button("生成发现证书"):
+                    selected_candidate = candidates[selected_idx]
+                    html_cert, cert_id = generate_discovery_certificate(
+                        selected_candidate,
+                        data, wcs,
+                        detection_date=detection_date,
+                        observer=observer_name,
+                    )
+                    st.success("证书生成完成！证书 ID: " + cert_id)
+                    st.download_button(
+                        "📥 下载证书（HTML）",
+                        html_cert,
+                        file_name="AstraFilter_Certificate_" + cert_id + ".html",
+                        mime="text/html",
+                    )
+                    st.markdown("**证书预览**")
+                    st.components.v1.html(html_cert, height=800, scrolling=True)
 
                 # ===== 发现报告生成按钮 =====
                 st.markdown("---")
