@@ -1,0 +1,48 @@
+name: Wake Streamlit App
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the app
+        run: |
+          pip install selenium --quiet
+          python - <<'PYEOF'
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          import time
+
+          options = Options()
+          options.add_argument('--headless=new')
+          options.add_argument('--no-sandbox')
+          options.add_argument('--disable-dev-shm-usage')
+          options.add_argument('--disable-gpu')
+          options.add_argument('--window-size=1280,800')
+
+          driver = webdriver.Chrome(options=options)
+          try:
+              driver.get("https://astrafilter-v3.streamlit.app")
+              time.sleep(5)
+              wait = WebDriverWait(driver, 15)
+              try:
+                  button = wait.until(
+                      EC.element_to_be_clickable(
+                          (By.XPATH, "//button[contains(text(),'Yes, get this app back up')]")
+                      )
+                  )
+                  button.click()
+                  print("✅ 應用正在喚醒")
+                  time.sleep(3)
+              except Exception:
+                  print("✅ 應用已經處於活躍狀態")
+          finally:
+              driver.quit()
+          PYEOF
